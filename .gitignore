@@ -1,0 +1,5 @@
+.env
+.env.test
+
+# Local Go build and test cache when working in restricted environments.
+.gocache/

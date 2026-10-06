@@ -1,0 +1,31 @@
+services:
+  driftdb:
+    image: postgres:18.3
+    container_name: driftdb
+    restart: always
+    environment:
+      POSTGRES_USER: driftadmin
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: drift
+    ports:
+      - "5432:5432"
+    volumes:
+      - drift-db-data:/var/lib/postgresql/
+
+  testdb:
+    image: postgres:18.3
+    container_name: testdb
+    restart: always
+    profiles: ["test"]
+    environment:
+      POSTGRES_USER: drifttest
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: drift_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - drift-db-testdata:/var/lib/postgresql/
+
+volumes:
+  drift-db-data:
+  drift-db-testdata:
