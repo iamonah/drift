@@ -16,7 +16,7 @@ type DBClient struct {
 }
 
 func NewDB(cfg *config.Database) (*DBClient, error) {
-	db, err := sql.Open("postgres", databaseURL(cfg))
+	db, err := sql.Open("postgres", DatabaseURL(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -39,7 +39,7 @@ func NewDB(cfg *config.Database) (*DBClient, error) {
 	return &DBClient{Client: db}, nil
 }
 
-func databaseURL(cfg *config.Database) string {
+func DatabaseURL(cfg *config.Database) string {
 	dsn := url.URL{
 		Scheme: "postgres",
 		User:   url.UserPassword(cfg.User, cfg.Password),

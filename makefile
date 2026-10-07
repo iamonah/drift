@@ -32,3 +32,5 @@ new-migration:
 migrations-up: 
 	@echo "Running up migrations..."
 	@migrate -database $(DRIFT_DSN) -path ./internal/database/migrations up
+	@migrate -database $(DRIFT_TEST_DSN) -path ./internal/database/migrations up
+

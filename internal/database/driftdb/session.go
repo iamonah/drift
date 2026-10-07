@@ -39,7 +39,10 @@ func (d *RefreshTokenDB) CreateToken(ctx context.Context, token RefreshToken) er
 		token.ExpiresAt,
 	)
 
-	return fmt.Errorf("createtoken: %w", err)
+	if err != nil {
+		return fmt.Errorf("createtoken: %w", err)
+	}
+	return nil
 }
 
 func (d *RefreshTokenDB) Get(ctx context.Context, userID uuid.UUID, hashedToken []byte) (RefreshToken, error) {
@@ -59,7 +62,10 @@ func (d *RefreshTokenDB) Get(ctx context.Context, userID uuid.UUID, hashedToken 
 		&token.ExpiresAt,
 	)
 
-	return token, fmt.Errorf("gettoken: %w", err)
+	if err != nil {
+		return token, fmt.Errorf("gettoken: %w", err)
+	}
+	return token, nil
 }
 
 func (d *RefreshTokenDB) Delete(ctx context.Context, userID uuid.UUID, hashedToken []byte) error {
@@ -80,7 +86,10 @@ func (d *RefreshTokenDB) DeleteAll(ctx context.Context, userID uuid.UUID) error 
 	`
 
 	_, err := d.db.ExecContext(ctx, stmt, userID)
-	return fmt.Errorf("deleteall: %w", err)
+	if err != nil {
+		return fmt.Errorf("deleteall: %w", err)
+	}
+	return nil
 }
 
 func (d *RefreshTokenDB) DeleteExpired(ctx context.Context) error {
@@ -90,5 +99,8 @@ func (d *RefreshTokenDB) DeleteExpired(ctx context.Context) error {
 	`
 
 	_, err := d.db.ExecContext(ctx, stmt)
-	return fmt.Errorf("deleteexpired: %w", err)
+	if err != nil {
+		return fmt.Errorf("deleteexpired: %w", err)
+	}
+	return nil
 }

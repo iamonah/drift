@@ -1,0 +1,120 @@
+package driftdb
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"uuid"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func createTestToken(t *testing.T, userID uuid.UUID) RefreshToken {
+	t.Helper()
+
+	token := RefreshToken{
+		UserID:      userID,
+		HashedToken: []byte("token_" + uuid.New().String()),
+		ExpiresAt:   time.Now().Add(24 * time.Hour),
+	}
+
+	err := testTokenDB.CreateToken(context.Background(), token)
+	require.NoError(t, err)
+
+	return token
+}
+
+func TestRefreshTokenDB_CreateToken(t *testing.T) {
+	initTestData(t)
+
+	token := RefreshToken{
+		UserID:      TestUserID,
+		HashedToken: []byte("token_" + uuid.New().String()),
+		ExpiresAt:   time.Now().Add(24 * time.Hour),
+	}
+
+	err := testTokenDB.CreateToken(context.Background(), token)
+	require.NoError(t, err)
+
+	retrieved, err := testTokenDB.Get(context.Background(), token.UserID, token.HashedToken)
+	require.NoError(t, err)
+	assert.Equal(t, token.HashedToken, retrieved.HashedToken)
+}
+
+func TestRefreshTokenDB_Get(t *testing.T) {
+	initTestData(t)
+
+	token := createTestToken(t, TestUserID)
+
+	retrieved, err := testTokenDB.Get(context.Background(), token.UserID, token.HashedToken)
+	require.NoError(t, err)
+	assert.Equal(t, token.HashedToken, retrieved.HashedToken)
+	assert.NotZero(t, retrieved.CreatedAt)
+}
+
+func TestRefreshTokenDB_Get_NotFound(t *testing.T) {
+	initTestData(t)
+
+	_, err := testTokenDB.Get(context.Background(), uuid.New(), []byte("nonexistent"))
+	assert.Error(t, err)
+}
+
+func TestRefreshTokenDB_Delete(t *testing.T) {
+	initTestData(t)
+
+	token := createTestToken(t, TestUserID)
+
+	err := testTokenDB.Delete(context.Background(), token.UserID, token.HashedToken)
+	require.NoError(t, err)
+
+	_, err = testTokenDB.Get(context.Background(), token.UserID, token.HashedToken)
+	assert.Error(t, err)
+}
+
+func TestRefreshTokenDB_DeleteAll(t *testing.T) {
+	initTestData(t)
+
+	token1 := createTestToken(t, TestUserID)
+	token2 := createTestToken(t, TestUserID)
+
+	err := testTokenDB.DeleteAll(context.Background(), TestUserID)
+	require.NoError(t, err)
+
+	_, err = testTokenDB.Get(context.Background(), token1.UserID, token1.HashedToken)
+	assert.Error(t, err)
+
+	_, err = testTokenDB.Get(context.Background(), token2.UserID, token2.HashedToken)
+	assert.Error(t, err)
+}
+
+func TestRefreshTokenDB_DeleteExpired(t *testing.T) {
+	initTestData(t)
+
+	expiredToken := RefreshToken{
+		UserID:      TestUserID,
+		HashedToken: []byte("expired_" + uuid.New().String()),
+		ExpiresAt:   time.Now().Add(-time.Hour),
+	}
+	validToken := RefreshToken{
+		UserID:      TestUserID,
+		HashedToken: []byte("valid_" + uuid.New().String()),
+		ExpiresAt:   time.Now().Add(24 * time.Hour),
+	}
+
+	err := testTokenDB.CreateToken(context.Background(), expiredToken)
+	require.NoError(t, err)
+
+	err = testTokenDB.CreateToken(context.Background(), validToken)
+	require.NoError(t, err)
+
+	err = testTokenDB.DeleteExpired(context.Background())
+	require.NoError(t, err)
+
+	_, err = testTokenDB.Get(context.Background(), expiredToken.UserID, expiredToken.HashedToken)
+	assert.Error(t, err)
+
+	_, err = testTokenDB.Get(context.Background(), validToken.UserID, validToken.HashedToken)
+	assert.NoError(t, err)
+}

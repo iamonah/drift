@@ -65,7 +65,10 @@ func (d *UserDB) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&user.CreatedAt,
 	)
 
-	return user, fmt.Errorf("getuserbyid: %w", err)
+	if err != nil {
+		return user, fmt.Errorf("getuserbyid: %w", err)
+	}
+	return user, nil
 }
 
 func (d *UserDB) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -84,7 +87,10 @@ func (d *UserDB) GetUserByEmail(ctx context.Context, email string) (User, error)
 		&user.CreatedAt,
 	)
 
-	return user, fmt.Errorf("getuserbyemail: %w", err)
+	if err != nil {
+		return user, fmt.Errorf("getuserbyemail: %w", err)
+	}
+	return user, nil
 }
 
 func (d *UserDB) UpdateEmail(ctx context.Context, id uuid.UUID, email string) error {
@@ -95,7 +101,10 @@ func (d *UserDB) UpdateEmail(ctx context.Context, id uuid.UUID, email string) er
 	`
 
 	_, err := d.db.ExecContext(ctx, stmt, id, email)
-	return fmt.Errorf("updateemail: %w", err)
+	if err != nil {
+		return fmt.Errorf("updateemail: %w", err)
+	}
+	return nil
 }
 
 func (d *UserDB) UpdatePassword(ctx context.Context, id uuid.UUID, hashedPassword []byte) error {
@@ -106,7 +115,10 @@ func (d *UserDB) UpdatePassword(ctx context.Context, id uuid.UUID, hashedPasswor
 	`
 
 	_, err := d.db.ExecContext(ctx, stmt, id, hashedPassword)
-	return fmt.Errorf("updatepassword: %w", err)
+	if err != nil {
+		return fmt.Errorf("updatepassword: %w", err)
+	}
+	return nil
 }
 
 func (d *UserDB) DeleteUser(ctx context.Context, id uuid.UUID) error {
@@ -116,5 +128,8 @@ func (d *UserDB) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	`
 
 	_, err := d.db.ExecContext(ctx, stmt, id)
-	return fmt.Errorf("deleteuser: %w", err)
+	if err != nil {
+		return fmt.Errorf("deleteuser: %w", err)
+	}
+	return nil
 }
