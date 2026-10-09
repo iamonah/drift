@@ -9,7 +9,7 @@ import (
 )
 
 type RefreshTokenDB struct {
-	db *sql.DB
+	db DBTX
 }
 
 func NewRefreshTokenDB(db *sql.DB) *RefreshTokenDB {

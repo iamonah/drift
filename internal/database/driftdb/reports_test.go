@@ -11,11 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func createTestReport(t *testing.T) Report {
+func createTestReport(t *testing.T, userID uuid.UUID) Report {
 	t.Helper()
 
 	report := Report{
-		UserID:     TestReportUser,
+		UserID:     userID,
 		ID:         uuid.New(),
 		ReportType: "test",
 	}
@@ -27,10 +27,10 @@ func createTestReport(t *testing.T) Report {
 }
 
 func TestReportDB_CreateReport(t *testing.T) {
-	initTestData(t)
+	user := createTestUser(t)
 
 	report := Report{
-		UserID:     TestReportUser,
+		UserID:     user.ID,
 		ID:         uuid.New(),
 		ReportType: "sales_summary",
 	}
@@ -45,9 +45,9 @@ func TestReportDB_CreateReport(t *testing.T) {
 }
 
 func TestReportDB_CreateReport_Duplicate(t *testing.T) {
-	initTestData(t)
 
-	report := createTestReport(t)
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
 
 	err := testReportDB.CreateReport(context.Background(), report)
 	assert.Error(t, err)
@@ -55,9 +55,9 @@ func TestReportDB_CreateReport_Duplicate(t *testing.T) {
 }
 
 func TestReportDB_GetReport(t *testing.T) {
-	initTestData(t)
 
-	report := createTestReport(t)
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
 
 	retrieved, err := testReportDB.GetReport(context.Background(), report.UserID, report.ID)
 	require.NoError(t, err)
@@ -67,19 +67,18 @@ func TestReportDB_GetReport(t *testing.T) {
 }
 
 func TestReportDB_GetReport_NotFound(t *testing.T) {
-	initTestData(t)
 
 	_, err := testReportDB.GetReport(context.Background(), uuid.New(), uuid.New())
 	assert.Error(t, err)
 }
 
 func TestReportDB_GetReportsByUser(t *testing.T) {
-	initTestData(t)
 
-	report1 := createTestReport(t)
-	report2 := createTestReport(t)
+	user := createTestUser(t)
+	report1 := createTestReport(t, user.ID)
+	report2 := createTestReport(t, user.ID)
 
-	reports, err := testReportDB.GetReportsByUser(context.Background(), TestReportUser)
+	reports, err := testReportDB.GetReportsByUser(context.Background(), user.ID)
 	require.NoError(t, err)
 
 	var found1, found2 bool
@@ -93,9 +92,9 @@ func TestReportDB_GetReportsByUser(t *testing.T) {
 }
 
 func TestReportDB_MarkStarted(t *testing.T) {
-	initTestData(t)
 
-	report := createTestReport(t)
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
 
 	err := testReportDB.MarkStarted(context.Background(), report.UserID, report.ID)
 	require.NoError(t, err)
@@ -106,9 +105,9 @@ func TestReportDB_MarkStarted(t *testing.T) {
 }
 
 func TestReportDB_MarkFailed(t *testing.T) {
-	initTestData(t)
 
-	report := createTestReport(t)
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
 	err := testReportDB.MarkFailed(context.Background(), report.UserID, report.ID, "file processing failed")
 	require.NoError(t, err)
 
@@ -119,9 +118,9 @@ func TestReportDB_MarkFailed(t *testing.T) {
 }
 
 func TestReportDB_MarkCompleted(t *testing.T) {
-	initTestData(t)
 
-	report := createTestReport(t)
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
 	filePath := "/reports/test.pdf"
 	downloadURL := "https://example.com/download/test"
 	expiresAt := time.Now().Add(24 * time.Hour)
@@ -134,12 +133,13 @@ func TestReportDB_MarkCompleted(t *testing.T) {
 	assert.True(t, retrieved.CompletedAt.Valid)
 	assert.Equal(t, filePath, retrieved.OutputFilePath.String)
 	assert.Equal(t, downloadURL, retrieved.DownloadURL.String)
+
 }
 
 func TestReportDB_Delete(t *testing.T) {
-	initTestData(t)
 
-	report := createTestReport(t)
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
 
 	err := testReportDB.Delete(context.Background(), report.UserID, report.ID)
 	require.NoError(t, err)

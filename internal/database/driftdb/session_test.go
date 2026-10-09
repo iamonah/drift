@@ -27,10 +27,10 @@ func createTestToken(t *testing.T, userID uuid.UUID) RefreshToken {
 }
 
 func TestRefreshTokenDB_CreateToken(t *testing.T) {
-	initTestData(t)
+	user := createTestUser(t)
 
 	token := RefreshToken{
-		UserID:      TestUserID,
+		UserID:      user.ID,
 		HashedToken: []byte("token_" + uuid.New().String()),
 		ExpiresAt:   time.Now().Add(24 * time.Hour),
 	}
@@ -44,9 +44,8 @@ func TestRefreshTokenDB_CreateToken(t *testing.T) {
 }
 
 func TestRefreshTokenDB_Get(t *testing.T) {
-	initTestData(t)
-
-	token := createTestToken(t, TestUserID)
+	user := createTestUser(t)
+	token := createTestToken(t, user.ID)
 
 	retrieved, err := testTokenDB.Get(context.Background(), token.UserID, token.HashedToken)
 	require.NoError(t, err)
@@ -55,16 +54,14 @@ func TestRefreshTokenDB_Get(t *testing.T) {
 }
 
 func TestRefreshTokenDB_Get_NotFound(t *testing.T) {
-	initTestData(t)
 
 	_, err := testTokenDB.Get(context.Background(), uuid.New(), []byte("nonexistent"))
 	assert.Error(t, err)
 }
 
 func TestRefreshTokenDB_Delete(t *testing.T) {
-	initTestData(t)
-
-	token := createTestToken(t, TestUserID)
+	user := createTestUser(t)
+	token := createTestToken(t, user.ID)
 
 	err := testTokenDB.Delete(context.Background(), token.UserID, token.HashedToken)
 	require.NoError(t, err)
@@ -74,12 +71,11 @@ func TestRefreshTokenDB_Delete(t *testing.T) {
 }
 
 func TestRefreshTokenDB_DeleteAll(t *testing.T) {
-	initTestData(t)
+	user := createTestUser(t)
+	token1 := createTestToken(t, user.ID)
+	token2 := createTestToken(t, user.ID)
 
-	token1 := createTestToken(t, TestUserID)
-	token2 := createTestToken(t, TestUserID)
-
-	err := testTokenDB.DeleteAll(context.Background(), TestUserID)
+	err := testTokenDB.DeleteAll(context.Background(), user.ID)
 	require.NoError(t, err)
 
 	_, err = testTokenDB.Get(context.Background(), token1.UserID, token1.HashedToken)
@@ -90,15 +86,15 @@ func TestRefreshTokenDB_DeleteAll(t *testing.T) {
 }
 
 func TestRefreshTokenDB_DeleteExpired(t *testing.T) {
-	initTestData(t)
+	user := createTestUser(t)
 
 	expiredToken := RefreshToken{
-		UserID:      TestUserID,
+		UserID:      user.ID,
 		HashedToken: []byte("expired_" + uuid.New().String()),
 		ExpiresAt:   time.Now().Add(-time.Hour),
 	}
 	validToken := RefreshToken{
-		UserID:      TestUserID,
+		UserID:      user.ID,
 		HashedToken: []byte("valid_" + uuid.New().String()),
 		ExpiresAt:   time.Now().Add(24 * time.Hour),
 	}

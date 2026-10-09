@@ -12,7 +12,7 @@ import (
 )
 
 type UserDB struct {
-	db *sql.DB
+	db DBTX
 }
 
 func NewUserDB(db *sql.DB) *UserDB {

@@ -11,7 +11,6 @@ import (
 )
 
 func TestUserDB_InsertUser(t *testing.T) {
-	initTestData(t)
 
 	user := User{
 		ID:             uuid.New(),
@@ -29,7 +28,6 @@ func TestUserDB_InsertUser(t *testing.T) {
 }
 
 func TestUserDB_InsertUser_DuplicateEmail(t *testing.T) {
-	initTestData(t)
 
 	email := "duplicate_" + uuid.New().String() + "@example.com"
 	user := User{ID: uuid.New(), Email: email, HashedPassword: []byte("pass")}
@@ -47,23 +45,21 @@ func TestUserDB_InsertUser_DuplicateEmail(t *testing.T) {
 }
 
 func TestUserDB_GetUserByID(t *testing.T) {
-	initTestData(t)
+	createdUser := createTestUser(t)
 
-	user, err := testUserDB.GetUserByID(context.Background(), TestUserID)
+	user, err := testUserDB.GetUserByID(context.Background(), createdUser.ID)
 	require.NoError(t, err)
-	assert.Equal(t, TestUserID, user.ID)
+	assert.Equal(t, createdUser.ID, user.ID)
 	assert.NotZero(t, user.CreatedAt)
 }
 
 func TestUserDB_GetUserByID_NotFound(t *testing.T) {
-	initTestData(t)
 
 	_, err := testUserDB.GetUserByID(context.Background(), uuid.New())
 	assert.Error(t, err)
 }
 
 func TestUserDB_GetUserByEmail(t *testing.T) {
-	initTestData(t)
 
 	user := User{
 		ID:             uuid.New(),
@@ -81,7 +77,6 @@ func TestUserDB_GetUserByEmail(t *testing.T) {
 }
 
 func TestUserDB_UpdateEmail(t *testing.T) {
-	initTestData(t)
 
 	user := User{
 		ID:             uuid.New(),
@@ -99,7 +94,6 @@ func TestUserDB_UpdateEmail(t *testing.T) {
 }
 
 func TestUserDB_UpdatePassword(t *testing.T) {
-	initTestData(t)
 
 	user := User{
 		ID:             uuid.New(),
@@ -117,7 +111,6 @@ func TestUserDB_UpdatePassword(t *testing.T) {
 }
 
 func TestUserDB_DeleteUser(t *testing.T) {
-	initTestData(t)
 
 	user := User{
 		ID:             uuid.New(),

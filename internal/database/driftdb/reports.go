@@ -12,7 +12,7 @@ import (
 )
 
 type ReportDB struct {
-	db *sql.DB
+	db DBTX
 }
 
 func NewReportDB(db *sql.DB) *ReportDB {
