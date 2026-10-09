@@ -22,3 +22,14 @@ awssqs:
   region: us-east-1
   access_key_id: ""
   secret_access_key: ""
+
+jwt:
+  secret_key: ""
+  issuer: drift
+  audience: drift
+  access_token_duration: 15m
+  refresh_token_duration: 7d
+
+cors_allowed_origins:
+  - http://localhost:3000
+  - http://localhost:8080
