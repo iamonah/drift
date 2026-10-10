@@ -73,6 +73,11 @@ func AuthBearerToken(log *zerolog.Logger, tokenMaker util.TokenMaker) Middleware
 				util.WriteJSON(w, http.StatusUnauthorized, "invalid or expired token")
 				return
 			}
+			if token.TokenType != util.TokenTypeAccess {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				util.WriteJSON(w, http.StatusUnauthorized, "invalid access token")
+				return
+			}
 
 			ctx := context.WithValue(r.Context(), AuthContextPayloadKey, token)
 			next.ServeHTTP(w, r.WithContext(ctx))

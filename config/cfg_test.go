@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadConfigFile(t *testing.T) {
@@ -25,6 +26,18 @@ server:
   read_timeout: 10s
   write_timeout: 30s
   idle_timeout: 60s
+  cors_allowed_origins:
+    - http://localhost:3000
+awssqs:
+  region: us-east-1
+  access_key_id: test-access-key
+  secret_access_key: test-secret-key
+jwt:
+  secret_key: test-jwt-secret
+  issuer: drift
+  audience: drift
+  access_token_duration: 15m
+  refresh_token_duration: 7d
 `)
 	if err := os.WriteFile(path, contents, 0o600); err != nil {
 		t.Fatal(err)
@@ -39,5 +52,15 @@ server:
 	}
 	if cfg.Server.ReadTimeout != "10s" || cfg.DB.MaxConns != 25 {
 		t.Fatalf("LoadConfigFile() = %#v, want decoded durations and connection limits", cfg)
+	}
+}
+
+func TestParseDuration(t *testing.T) {
+	duration, err := ParseDuration("7d")
+	if err != nil {
+		t.Fatalf("ParseDuration() error = %v", err)
+	}
+	if duration != 7*24*time.Hour {
+		t.Fatalf("ParseDuration() = %v, want %v", duration, 7*24*time.Hour)
 	}
 }
