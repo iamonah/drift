@@ -13,9 +13,9 @@ import (
 	"github.com/rs/zerolog"
 )
 
-type Middleware func(http.Handler) http.Handler
+type Middleware func(http.HandlerFunc) http.HandlerFunc
 
-func Chain(h http.Handler, middlewares ...Middleware) http.Handler {
+func Chain(h http.HandlerFunc, middlewares ...Middleware) http.HandlerFunc {
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		h = middlewares[i](h)
 	}
@@ -24,7 +24,7 @@ func Chain(h http.Handler, middlewares ...Middleware) http.Handler {
 }
 
 func RecoverPanic(log *zerolog.Logger) Middleware {
-	return func(next http.Handler) http.Handler {
+	return func(next http.HandlerFunc) http.HandlerFunc {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if rec := recover(); rec != nil {
@@ -51,7 +51,7 @@ const (
 )
 
 func AuthBearerToken(log *zerolog.Logger, tokenMaker util.TokenMaker) Middleware {
-	return func(next http.Handler) http.Handler {
+	return func(next http.HandlerFunc) http.HandlerFunc {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get(string(AuthHeaderAuthorization))
 			if authHeader == "" {
@@ -82,8 +82,8 @@ func AuthBearerToken(log *zerolog.Logger, tokenMaker util.TokenMaker) Middleware
 
 const origin = "Origin"
 
-func EnableCors(cfg config.Config) Middleware {
-	return func(next http.Handler) http.Handler {
+func EnableCors(cfg *config.Config) Middleware {
+	return func(next http.HandlerFunc) http.HandlerFunc {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Add("Vary", "Origin")
 			w.Header().Add("Vary", "Access-Control-Request-Methods")
@@ -152,7 +152,7 @@ func (m *ResponseWriter) Unwrap() http.ResponseWriter {
 }
 
 func Logger(log *zerolog.Logger) Middleware {
-	return func(next http.Handler) http.Handler {
+	return func(next http.HandlerFunc) http.HandlerFunc {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			ip := r.RemoteAddr
@@ -175,7 +175,6 @@ func Logger(log *zerolog.Logger) Middleware {
 					Dur("latency", time.Since(start)).
 					Msg("incoming request")
 			}()
-
 			next.ServeHTTP(nwr, r)
 		})
 	}
