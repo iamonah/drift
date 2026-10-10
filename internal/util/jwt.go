@@ -18,40 +18,45 @@ var _ TokenMaker = (*JWTAuthMaker)(nil)
 
 var ErrExpired = errors.New("token expired")
 
+const (
+	TokenTypeAccess  = "access"
+	TokenTypeRefresh = "refresh"
+)
+
 type JWTData struct {
+	Audience    string
 	Role        string
 	ServiceName string
+	TokenType   string
 	Duration    time.Duration
 	UserID      uuid.UUID
 }
 
-func NewJWTData(userid uuid.UUID, role string, duration time.Duration, svcName string) JWTData {
+func NewJWTData(userid uuid.UUID, duration time.Duration, svcName string) JWTData {
 	return JWTData{
 		UserID:      userid,
-		Role:        role,
 		Duration:    duration,
 		ServiceName: svcName,
 	}
 }
 
 type Payload struct {
-	// RoleID string    `json:"role_id"`
-	UserID uuid.UUID `json:"user_id"`
+	UserID    uuid.UUID `json:"user_id"`
+	TokenType string    `json:"token_type"`
 
 	jwt.RegisteredClaims
 }
 
-func NewPayload(userID uuid.UUID, roleid string, duration time.Duration, svcName string) (*Payload, error) {
+func newPayload(userID uuid.UUID, duration time.Duration, serviceName, audience, tokenType string) (*Payload, error) {
 	id := uuid.New()
 	payload := &Payload{
-		UserID: userID,
-		// RoleID: roleid,		
-		RegisteredClaims: jwt.RegisteredClaims{	
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),	
-			ID:        id.String(),
-			Issuer:    svcName,
-		},
+		UserID:    userID,
+		TokenType: tokenType,
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ID:        id.String(),
+		Issuer:    serviceName,
+		Audience:  jwt.ClaimStrings{audience},
 	}
 	return payload, nil
 }
@@ -67,7 +72,7 @@ func NewJWTMaker(key string) JWTAuthMaker {
 }
 
 func (jta *JWTAuthMaker) GenerateToken(data JWTData) (string, *Payload, error) {
-	payloadData, err := NewPayload(data.UserID, data.Role, data.Duration, data.ServiceName)
+	payloadData, err := newPayload(data.UserID, data.Duration, data.ServiceName, data.Audience, data.TokenType)
 	if err != nil {
 		return "", nil, fmt.Errorf("generate token: %w", err)
 	}

@@ -7,8 +7,9 @@ import (
 )
 
 func ReadJSON[T any](r *http.Request, v *T) error {
+	defer r.Body.Close()
 	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields() // Disallow unknown fields
+	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(v); err != nil {
 		return fmt.Errorf("error decoding JSON: %w", err)
