@@ -46,10 +46,10 @@ func createTestUser(t *testing.T) User {
 		HashedPassword: []byte("hashedpass"),
 	}
 
-	err := testUserDB.InsertUser(context.Background(), user)
+	createdUser, err := testUserDB.InsertUser(context.Background(), user)
 	require.NoError(t, err)
 
-	return user
+	return *createdUser
 }
 
 func TestMain(m *testing.M) {

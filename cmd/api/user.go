@@ -1,45 +1,74 @@
 package api
 
 import (
-	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
+	"time"
 	"uuid"
 
 	"github.com/iamonah/drift/internal/database/driftdb"
 	"github.com/iamonah/drift/internal/util"
-	"golang.org/x/crypto/bcrypt"
 )
 
+type createUserRequest struct {
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required,min=6"`
+}
+
+type createUserResponse struct {
+	ID        uuid.UUID `json:"id"`
+	Email     string    `json:"email"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 func (a *App) CreateUser(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		util.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request payload"})
+	var req createUserRequest
+	if err := util.ReadJSON(r, &req); err != nil {
+		a.writeError(w, http.StatusBadRequest, errors.New("invalid request payload"))
 		return
 	}
 
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err := util.NewValidate(req); err != nil {
+		a.writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	hashedPassword, err := util.HashPassword(req.Password)
 	if err != nil {
-		http.Error(w, "Failed to hash password", http.StatusInternalServerError)
+		a.writeError(w, http.StatusInternalServerError, errors.New(http.StatusText(http.StatusInternalServerError)))
 		return
 	}
 
-	user := driftdb.User{
+	data := driftdb.User{
 		ID:             uuid.New(),
 		Email:          req.Email,
 		HashedPassword: hashedPassword,
 	}
+	user, err := a.Store.UserStore.InsertUser(r.Context(), data)
+	if err != nil {
+		if errors.Is(err, driftdb.ErrUserAlreadyExists) {
+			a.writeError(w, http.StatusConflict, errors.New("user already exists"))
+			return
+		}
 
-	if err := a.Store.UserStore.InsertUser(r.Context(), user); err != nil {
-		util.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("Failed to create user: %v", err)})
+		a.writeError(w, http.StatusInternalServerError, errors.New(http.StatusText(http.StatusInternalServerError)))
 		return
 	}
 
-	a.log.Info().Msgf("User created: %s", user.ID.String())
+	a.log.Info().Str("user_id", user.ID.String()).Msg("user created")
+	a.writeJSON(w, http.StatusCreated, createUserResponse{
+		ID:        user.ID,
+		Email:     user.Email,
+		CreatedAt: user.CreatedAt,
+	})
+}
 
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"id": user.ID.String()})
+func (a *App) writeError(w http.ResponseWriter, status int, err error) {
+	a.writeJSON(w, status, util.NewError(status, err))
+}
+
+func (a *App) writeJSON(w http.ResponseWriter, status int, body any) {
+	if err := util.WriteJSON(w, status, body); err != nil {
+		a.log.Error().Err(err).Msg("failed to write JSON response")
+	}
 }

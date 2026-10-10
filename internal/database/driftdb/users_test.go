@@ -18,13 +18,14 @@ func TestUserDB_InsertUser(t *testing.T) {
 		HashedPassword: []byte("hashedpass123"),
 	}
 
-	err := testUserDB.InsertUser(context.Background(), user)
+	createdUser, err := testUserDB.InsertUser(context.Background(), user)
 	require.NoError(t, err)
+	require.NotZero(t, createdUser.CreatedAt)
 
-	retrieved, err := testUserDB.GetUserByID(context.Background(), user.ID)
+	retrieved, err := testUserDB.GetUserByID(context.Background(), createdUser.ID)
 	require.NoError(t, err)
-	assert.Equal(t, user.Email, retrieved.Email)
-	assert.Equal(t, user.HashedPassword, retrieved.HashedPassword)
+	assert.Equal(t, createdUser.Email, retrieved.Email)
+	assert.Equal(t, createdUser.HashedPassword, retrieved.HashedPassword)
 }
 
 func TestUserDB_InsertUser_DuplicateEmail(t *testing.T) {
@@ -32,10 +33,10 @@ func TestUserDB_InsertUser_DuplicateEmail(t *testing.T) {
 	email := "duplicate_" + uuid.New().String() + "@example.com"
 	user := User{ID: uuid.New(), Email: email, HashedPassword: []byte("pass")}
 
-	err := testUserDB.InsertUser(context.Background(), user)
+	_, err := testUserDB.InsertUser(context.Background(), user)
 	require.NoError(t, err)
 
-	err = testUserDB.InsertUser(context.Background(), User{
+	_, err = testUserDB.InsertUser(context.Background(), User{
 		ID:             uuid.New(),
 		Email:          email,
 		HashedPassword: []byte("pass2"),
@@ -67,7 +68,7 @@ func TestUserDB_GetUserByEmail(t *testing.T) {
 		HashedPassword: []byte("hashedpass"),
 	}
 
-	err := testUserDB.InsertUser(context.Background(), user)
+	_, err := testUserDB.InsertUser(context.Background(), user)
 	require.NoError(t, err)
 
 	retrieved, err := testUserDB.GetUserByEmail(context.Background(), user.Email)
@@ -83,7 +84,8 @@ func TestUserDB_UpdateEmail(t *testing.T) {
 		Email:          "old_" + uuid.New().String() + "@example.com",
 		HashedPassword: []byte("hashedpass"),
 	}
-	require.NoError(t, testUserDB.InsertUser(context.Background(), user))
+	_, err := testUserDB.InsertUser(context.Background(), user)
+	require.NoError(t, err)
 
 	newEmail := "new_" + uuid.New().String() + "@example.com"
 	require.NoError(t, testUserDB.UpdateEmail(context.Background(), user.ID, newEmail))
@@ -100,7 +102,8 @@ func TestUserDB_UpdatePassword(t *testing.T) {
 		Email:          "password_" + uuid.New().String() + "@example.com",
 		HashedPassword: []byte("oldpass"),
 	}
-	require.NoError(t, testUserDB.InsertUser(context.Background(), user))
+	_, err := testUserDB.InsertUser(context.Background(), user)
+	require.NoError(t, err)
 
 	newPassword := []byte("newhashedpass")
 	require.NoError(t, testUserDB.UpdatePassword(context.Background(), user.ID, newPassword))
@@ -117,10 +120,11 @@ func TestUserDB_DeleteUser(t *testing.T) {
 		Email:          "delete_" + uuid.New().String() + "@example.com",
 		HashedPassword: []byte("hashedpass"),
 	}
-	require.NoError(t, testUserDB.InsertUser(context.Background(), user))
+	_, err := testUserDB.InsertUser(context.Background(), user)
+	require.NoError(t, err)
 
 	require.NoError(t, testUserDB.DeleteUser(context.Background(), user.ID))
 
-	_, err := testUserDB.GetUserByID(context.Background(), user.ID)
+	_, err = testUserDB.GetUserByID(context.Background(), user.ID)
 	assert.Error(t, err)
 }

@@ -19,9 +19,20 @@ func NewFieldError(field, message string) FieldError {
 
 type FieldErrors []*FieldError
 
-func (fe FieldErrors) Add(field, message string) {
+func NewFieldErrors() FieldErrors {
+	return FieldErrors{}
+}
+
+func (fe *FieldErrors) Add(field, message string) {
 	fev := NewFieldError(field, message)
-	fe = append(fe, &fev)
+	*fe = append(*fe, &fev)
+}
+
+func (fe FieldErrors) ToError() error {
+	if len(fe) == 0 {
+		return nil
+	}
+	return fe
 }
 
 func (v FieldErrors) Error() string {
@@ -36,14 +47,14 @@ type AppError struct {
 }
 
 func NewError(errCode int, err error) *AppError {
-	var fliedErr FieldErrors
+	var fieldErr FieldErrors
 
-	if errors.As(err, &fliedErr) {
+	if errors.As(err, &fieldErr) {
 		return &AppError{
 			Code:    errCode,
 			Err:     http.StatusText(errCode),
 			Message: err.Error(),
-			Details: fliedErr,
+			Details: fieldErr,
 		}
 	}
 	return &AppError{

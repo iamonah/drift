@@ -18,7 +18,7 @@ type reportStore interface {
 }
 
 type userStore interface {
-	InsertUser(ctx context.Context, user User) error
+	InsertUser(ctx context.Context, user User) (*User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	UpdateEmail(ctx context.Context, id uuid.UUID, email string) error

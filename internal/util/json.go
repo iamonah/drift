@@ -18,16 +18,20 @@ func ReadJSON[T any](r *http.Request, v *T) error {
 }
 
 func WriteJSON(w http.ResponseWriter, status int, v any) error {
-	// 204 means "No Content", so skip writing a body.
 	if status == http.StatusNoContent {
 		w.WriteHeader(http.StatusNoContent)
 		return nil
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
 
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		return fmt.Errorf("error encoding JSON: %w", err)
+	jsonData, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("error marshaling JSON: %w", err)
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	if _, err := w.Write(jsonData); err != nil {
+		return fmt.Errorf("error writing JSON: %w", err)
 	}
 
 	return nil

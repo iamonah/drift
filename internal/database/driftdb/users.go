@@ -20,33 +20,34 @@ func NewUserDB(db *sql.DB) *UserDB {
 }
 
 type User struct {
-	ID             uuid.UUID
-	Email          string
-	HashedPassword []byte
-	CreatedAt      time.Time
+	ID             uuid.UUID `json:"id"`
+	Email          string    `json:"email"`
+	HashedPassword []byte    `json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
-func (d *UserDB) InsertUser(ctx context.Context, user User) error {
+func (d *UserDB) InsertUser(ctx context.Context, user User) (*User, error) {
 	stmt := `
 		INSERT INTO users (id, email, hashed_password)
 		VALUES ($1, $2, $3)
+		RETURNING id, email, created_at
 	`
 
-	_, err := d.db.ExecContext(ctx, stmt,
+	err := d.db.QueryRowContext(ctx, stmt,
 		user.ID,
 		user.Email,
 		user.HashedPassword,
-	)
+	).Scan(&user.ID, &user.Email, &user.CreatedAt)
 
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && string(pqErr.Code) == "23505" {
-			return fmt.Errorf("insertuser: user with email %s already exists", user.Email)
+			return nil, ErrUserAlreadyExists
 		}
-		return fmt.Errorf("insertuser: %w", err)
+		return nil, fmt.Errorf("insertuser: %w", err)
 	}
 
-	return nil
+	return &user, nil
 }
 
 func (d *UserDB) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
