@@ -28,7 +28,7 @@ type userStore interface {
 
 type refreshStore interface {
 	CreateToken(ctx context.Context, token RefreshToken) error
-	Get(ctx context.Context, userID uuid.UUID, hashedToken []byte) (RefreshToken, error)
+	Get(ctx context.Context, userID uuid.UUID, hashedToken []byte, tokenType string) (RefreshToken, error)
 	Delete(ctx context.Context, userID uuid.UUID, hashedToken []byte) error
 	DeleteAll(ctx context.Context, userID uuid.UUID) error
 	DeleteExpired(ctx context.Context) error

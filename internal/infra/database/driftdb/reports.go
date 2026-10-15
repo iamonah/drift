@@ -80,8 +80,14 @@ func (d *ReportDB) GetReport(ctx context.Context, userID uuid.UUID, id uuid.UUID
 		&report.FailedAt,
 		&report.CompletedAt,
 	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return report, ErrReportNotFound
+		}
+		return report, fmt.Errorf("getreport: %w", err)
+	}
 
-	return report, err
+	return report, nil
 }
 func (d *ReportDB) GetReportsByUser(ctx context.Context, userID uuid.UUID) ([]Report, error) {
 	stmt := `

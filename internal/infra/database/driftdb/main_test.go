@@ -12,7 +12,7 @@ import (
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/iamonah/drift/config"
-	"github.com/iamonah/drift/internal/database"
+	"github.com/iamonah/drift/internal/infra/database"
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )

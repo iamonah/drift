@@ -20,10 +20,10 @@ func NewUserDB(db *sql.DB) *UserDB {
 }
 
 type User struct {
-	ID             uuid.UUID `json:"id"`
-	Email          string    `json:"email"`
-	HashedPassword []byte    `json:"-"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID             uuid.UUID
+	Email          string
+	HashedPassword []byte
+	CreatedAt      time.Time
 }
 
 func (d *UserDB) InsertUser(ctx context.Context, user User) (*User, error) {
@@ -67,6 +67,9 @@ func (d *UserDB) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 	)
 
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return user, ErrUserDoesNotExist
+		}
 		return user, fmt.Errorf("getuserbyid: %w", err)
 	}
 	return user, nil
@@ -89,6 +92,9 @@ func (d *UserDB) GetUserByEmail(ctx context.Context, email string) (User, error)
 	)
 
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return user, ErrUserDoesNotExist
+		}
 		return user, fmt.Errorf("getuserbyemail: %w", err)
 	}
 	return user, nil

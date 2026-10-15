@@ -7,4 +7,5 @@ var (
 	ErrUserDoesNotExist     = errors.New("user does not exist")
 	ErrRefreshTokenNotFound = errors.New("refresh token not found")
 	ErrRefreshTokenBlocked  = errors.New("refresh token is blocked")
+	ErrReportNotFound       = errors.New("report not found")
 )
