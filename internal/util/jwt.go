@@ -51,6 +51,7 @@ func newPayload(userID uuid.UUID, duration time.Duration, serviceName, audience,
 	id := uuid.New()
 	payload := &Payload{
 		UserID:    userID,
+		Subject:   userID.String(),
 		TokenType: tokenType,
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
