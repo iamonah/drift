@@ -26,6 +26,7 @@ server:
   read_timeout: 10s
   write_timeout: 30s
   idle_timeout: 60s
+  host: 127.0.0.1
   cors_allowed_origins:
     - http://localhost:3000
 awssqs:

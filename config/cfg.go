@@ -31,6 +31,7 @@ type Server struct {
 	ReadTimeout        string   `koanf:"read_timeout"`
 	WriteTimeout       string   `koanf:"write_timeout"`
 	IdleTimeout        string   `koanf:"idle_timeout"`
+	Host               string   `koanf:"host" validate:"required"`
 	CORSAllowedOrigins []string `koanf:"cors_allowed_origins" validate:"required"`
 }
 

@@ -54,7 +54,7 @@ func (app *App) Serve() error {
 	}
 
 	srv := &http.Server{
-		Addr:         net.JoinHostPort("127.0.0.1", app.cfg.Server.Port),
+		Addr:         net.JoinHostPort(app.cfg.Server.Host, app.cfg.Server.Port),
 		Handler:      app.mux(),
 		IdleTimeout:  idleTimeout,
 		ReadTimeout:  readTimeout,
