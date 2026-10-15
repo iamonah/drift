@@ -26,6 +26,27 @@ services:
     volumes:
       - drift-db-testdata:/var/lib/postgresql/
 
+  localstack:
+    container_name: '${LOCALSTACK_DOCKER_NAME:-localstack-drift}'
+    image: localstack/localstack
+    ports:
+      - '127.0.0.1:4566:4566' # LocalStack Gateway
+      - '127.0.0.1:4510-4559:4510-4559' # external services port range
+      - '127.0.0.1:443:443' # LocalStack HTTPS Gateway
+    environment:
+      # Activate LocalStack for AWS: https://docs.localstack.cloud/getting-started/auth-token/
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:?}
+      # LocalStack configuration: https://docs.localstack.cloud/references/configuration/
+      - DEBUG=${DEBUG:-0}
+      - PERSISTENCE=${PERSISTENCE:-0}
+    volumes:
+      - '${LOCALSTACK_VOLUME_DIR:-./volume}:/var/lib/localstack'
+      - '/var/run/docker.sock:/var/run/docker.sock'
+
 volumes:
   drift-db-data:
   drift-db-testdata:
+
+networks:
+  default:
+    name: drift-network
