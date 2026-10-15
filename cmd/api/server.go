@@ -96,15 +96,15 @@ func (app *App) Serve() error {
 }
 
 func timeConv(dur config.Server) (idleTimeout, readTimeout, writeTimeout time.Duration, err error) {
-	idleTimeout, err = time.ParseDuration(dur.IdleTimeout)
+	idleTimeout, err = config.ParseDuration(dur.IdleTimeout)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("failed to parse idle timeout: %w", err)
 	}
-	readTimeout, err = time.ParseDuration(dur.ReadTimeout)
+	readTimeout, err = config.ParseDuration(dur.ReadTimeout)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("failed to parse read timeout: %w", err)
 	}
-	writeTimeout, err = time.ParseDuration(dur.WriteTimeout)
+	writeTimeout, err = config.ParseDuration(dur.WriteTimeout)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("failed to parse write timeout: %w", err)
 	}

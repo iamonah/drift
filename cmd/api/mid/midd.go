@@ -106,7 +106,7 @@ func EnableCors(cfg *config.Config) Middleware {
 							w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type")
 							w.Header().Set("Access-Control-Max-Age", "300")
 							w.WriteHeader(http.StatusNoContent)
-
+							return
 						}
 						break
 					}
