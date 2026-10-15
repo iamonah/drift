@@ -3,3 +3,12 @@
 
 # Local Go build and test cache when working in restricted environments.
 .gocache/
+volume/
+
+# Terraform: never commit provider binaries, state, or variable values.
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfvars
+terraform/*.tfvars.json
+terraform/crash.log
