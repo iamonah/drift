@@ -99,12 +99,12 @@ func (s *S3Actions) DownloadObjectTo(ctx context.Context, bucketName, objectKey 
 	return nil
 }
 
-func (s *S3Actions) HeadObject(ctx context.Context, bucketName, objectKey string) (*s3.HeadObjectOutput, error) {
+func (s *S3Actions) HeadObject(ctx context.Context, bucketName, objectKey string) (ObjectInfo, error) {
 	if bucketName == "" {
-		return nil, fmt.Errorf("head object: bucket name is required")
+		return ObjectInfo{}, fmt.Errorf("head object: bucket name is required")
 	}
 	if objectKey == "" {
-		return nil, fmt.Errorf("head object: object key is required")
+		return ObjectInfo{}, fmt.Errorf("head object: object key is required")
 	}
 
 	output, err := s.S3Client.HeadObject(ctx, &s3.HeadObjectInput{
@@ -112,10 +112,21 @@ func (s *S3Actions) HeadObject(ctx context.Context, bucketName, objectKey string
 		Key:    aws.String(objectKey),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("inspect object %q in bucket %q: %w", objectKey, bucketName, err)
+		return ObjectInfo{}, fmt.Errorf("inspect object %q in bucket %q: %w", objectKey, bucketName, err)
 	}
 
-	return output, nil
+	info := ObjectInfo{}
+	if output.ContentLength != nil {
+		info.Size = *output.ContentLength
+	}
+	if output.ETag != nil {
+		info.ETag = *output.ETag
+	}
+	if output.ContentType != nil {
+		info.ContentType = *output.ContentType
+	}
+
+	return info, nil
 }
 
 func (s *S3Actions) DeleteObject(ctx context.Context, bucketName, objectKey string) error {
