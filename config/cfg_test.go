@@ -29,9 +29,11 @@ server:
   cors_allowed_origins:
     - http://localhost:3000
 awssqs:
-  region: us-east-1
-  access_key_id: test-access-key
-  secret_access_key: test-secret-key
+  queue_name: my-test-queue
+  base_url: http://localhost:4566
+awss3:
+  bucket_name: my-test-bucket
+  base_url: http://localhost:4566
 jwt:
   secret_key: test-jwt-secret
   issuer: drift

@@ -21,14 +21,17 @@ server:
     - http://localhost:3000
     - http://localhost:8080
 
-awssqs:
-  region: us-east-1
-  access_key_id: YOUR_AWS_ACCESS_KEY_ID
-  secret_access_key: YOUR_AWS_SECRET_ACCESS_KEY
-
 jwt:
-  secret_key: ""
+  secret_key: secret
   issuer: drift
   audience: drift
-  access_token_duration: 15m
+  access_token_duration: 15m 
   refresh_token_duration: 7d
+
+awssqs:
+  queue_name: my-test-queue
+  base_url: http://localhost:4566
+
+awss3:
+  bucket_name: my-test-bucket
+  base_url: http://localhost:4566

@@ -2,56 +2,63 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-playground/validator/v10"
-	"go.yaml.in/yaml/v4"
+	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/env/v2"
+	"github.com/knadh/koanf/providers/file"
+	"github.com/knadh/koanf/v2"
 )
 
 type Database struct {
-	Host            string `yaml:"host" validate:"required"`
-	Port            string `yaml:"port" validate:"required"`
-	User            string `yaml:"user" validate:"required"`
-	Password        string `yaml:"password" validate:"required"`
-	Name            string `yaml:"name" validate:"required"`
-	SSLMode         string `yaml:"ssl_mode"`
-	ConnMaxLifetime string `yaml:"conn_max_lifetime"`
-	ConnMaxIdleTime string `yaml:"conn_max_idle_time"`
-	MaxConns        int    `yaml:"max_conns"`
-	MinConns        int    `yaml:"min_conns"`
+	Host            string `koanf:"host" validate:"required"`
+	Port            string `koanf:"port" validate:"required"`
+	User            string `koanf:"user" validate:"required"`
+	Password        string `koanf:"password" validate:"required"`
+	Name            string `koanf:"name" validate:"required"`
+	SSLMode         string `koanf:"ssl_mode"`
+	ConnMaxLifetime string `koanf:"conn_max_lifetime"`
+	ConnMaxIdleTime string `koanf:"conn_max_idle_time"`
+	MaxConns        int    `koanf:"max_conns"`
+	MinConns        int    `koanf:"min_conns"`
 }
 
 type Server struct {
-	Port               string   `yaml:"port" validate:"required"`
-	ReadTimeout        string   `yaml:"read_timeout"`
-	WriteTimeout       string   `yaml:"write_timeout"`
-	IdleTimeout        string   `yaml:"idle_timeout"`
-	CORSAllowedOrigins []string `yaml:"cors_allowed_origins" validate:"required"`
+	Port               string   `koanf:"port" validate:"required"`
+	ReadTimeout        string   `koanf:"read_timeout"`
+	WriteTimeout       string   `koanf:"write_timeout"`
+	IdleTimeout        string   `koanf:"idle_timeout"`
+	CORSAllowedOrigins []string `koanf:"cors_allowed_origins" validate:"required"`
 }
 
 type Config struct {
-	Environment string   `yaml:"environment" validate:"required"`
-	Server      Server   `yaml:"server"`
-	DB          Database `yaml:"database"`
-	AWSSQS      AWSSQS   `yaml:"awssqs"`
-	JWT         JWT      `yaml:"jwt"`
+	Environment string   `koanf:"environment" validate:"required"`
+	Server      Server   `koanf:"server" validate:"required"`
+	DB          Database `koanf:"database" validate:"required"`
+	AWSSQS      AWSSQS   `koanf:"awssqs" validate:"required"`
+	AWSS3       AWSS3    `koanf:"awss3" validate:"required"`
+	JWT         JWT      `koanf:"jwt" validate:"required"`
 }
 
 type AWSSQS struct {
-	Region          string `yaml:"region" validate:"required"`
-	AccessKeyID     string `yaml:"access_key_id" validate:"required"`
-	SecretAccessKey string `yaml:"secret_access_key" validate:"required"`
+	QueueName string `koanf:"queue_name" validate:"required"`
+	BaseURL   string `koanf:"base_url" validate:"required"` //localstack endpoint URL for SQS
+}
+
+type AWSS3 struct {
+	BucketName string `koanf:"bucket_name" validate:"required"`
+	BaseURL    string `koanf:"base_url" validate:"required"` //localstack endpoint URL for S3
 }
 
 type JWT struct {
-	SecretKey            string `yaml:"secret_key" validate:"required"`
-	Issuer               string `yaml:"issuer" validate:"required"`
-	Audience             string `yaml:"audience" validate:"required"`
-	AccessTokenDuration  string `yaml:"access_token_duration" validate:"required"`
-	RefreshTokenDuration string `yaml:"refresh_token_duration" validate:"required"`
+	SecretKey            string `koanf:"secret_key" validate:"required"`
+	Issuer               string `koanf:"issuer" validate:"required"`
+	Audience             string `koanf:"audience" validate:"required"`
+	AccessTokenDuration  string `koanf:"access_token_duration" validate:"required"`
+	RefreshTokenDuration string `koanf:"refresh_token_duration" validate:"required"`
 }
 
 func LoadConfig() (*Config, error) {
@@ -59,22 +66,33 @@ func LoadConfig() (*Config, error) {
 }
 
 func LoadConfigFile(path string) (*Config, error) {
-	var config Config
+	k := koanf.New(".")
 
-	file, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("loadconfig: read %s: %w", path, err)
+	if err := k.Load(file.Provider(path), yaml.Parser()); err != nil {
+
+		return nil, fmt.Errorf("loadconfig: load %s: %w", path, err)
 	}
 
-	reader := strings.NewReader(string(file))
-	if err := yaml.NewDecoder(reader).Decode(&config); err != nil {
-		return nil, fmt.Errorf("loadconfig: decode %s: %w", path, err)
+	// Environment variables override YAML values.
+	if err := k.Load(env.Provider(".", env.Opt{
+		TransformFunc: func(key, value string) (string, any) {
+			key = strings.ReplaceAll(key, "__", ".")
+			return strings.ToLower(key), value
+		},
+	}), nil); err != nil {
+		return nil, fmt.Errorf("loadconfig: load environment: %w", err)
+	}
+
+	var config Config
+	if err := k.Unmarshal("", &config); err != nil {
+		return nil, fmt.Errorf("loadconfig: decode: %w", err)
 	}
 
 	validate := validator.New()
 	if err := validate.Struct(config); err != nil {
 		return nil, fmt.Errorf("loadconfig: validate: %w", err)
 	}
+
 	if _, err := ParseDuration(config.JWT.AccessTokenDuration); err != nil {
 		return nil, fmt.Errorf("loadconfig: invalid access token duration: %w", err)
 	}
