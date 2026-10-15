@@ -1,4 +1,4 @@
-package api
+package main
 
 import (
 	"errors"
@@ -12,10 +12,15 @@ import (
 func (a *App) mux() http.Handler {
 	r := mux.NewRouter()
 	logged := midd.Logger(&a.log)
+	authenticated := midd.AuthBearerToken(&a.log, a.jwtMaker)
+
 	r.HandleFunc("/health", a.handler(a.HealthCheckHandler)).Methods(http.MethodGet)
-	r.HandleFunc("/api/v1/auth/signup", a.handler(a.SignUp)).Methods(http.MethodPost)
-	r.HandleFunc("/api/v1/auth/signin", a.handler(a.SignIn)).Methods(http.MethodPost)
-	r.HandleFunc("/api/v1/auth/refresh", a.handler(a.RefreshToken)).Methods(http.MethodPost)
+	r.HandleFunc("/api/v1/auth/signup", a.SignUp()).Methods(http.MethodPost)
+	r.HandleFunc("/api/v1/auth/signin", a.SignIn()).Methods(http.MethodPost)
+	r.HandleFunc("/api/v1/auth/refresh", a.RefreshToken()).Methods(http.MethodPost)
+
+	r.HandleFunc("/api/v1/reports", authenticated(a.CreateReport())).Methods(http.MethodPost)
+	r.HandleFunc("/api/v1/reports/{report_id}", authenticated(a.GetReportByID())).Methods(http.MethodGet)
 
 	return midd.Chain(r.ServeHTTP, midd.RecoverPanic(&a.log), logged, midd.EnableCors(a.cfg))
 }
@@ -31,15 +36,14 @@ func (a *App) handler(f func(http.ResponseWriter, *http.Request) error) http.Han
 		if err := f(w, r); err != nil {
 			var appErr *util.AppError
 			if errors.As(err, &appErr) {
-				_ = util.WriteJSON(w, appErr.Code, appErr)
+				if err = util.WriteJSON(w, appErr.Code, appErr); err != nil {
+					a.log.Error().Err(err).Str("method", r.Method).Str("path", r.URL.Path).
+						Msg("failed to write error response")
+				}
 				return
 			}
 
-			a.log.Error().
-				Err(err).
-				Str("method", r.Method).
-				Str("path", r.URL.Path).
-				Msg("unhandled request error")
+			a.log.Error().Err(err).Str("method", r.Method).Str("path", r.URL.Path).Msg("unhandled request error")
 
 			if writeErr := util.WriteJSON(w, http.StatusInternalServerError,
 				util.NewError(http.StatusInternalServerError, errors.New(http.StatusText(http.StatusInternalServerError)))); writeErr != nil {

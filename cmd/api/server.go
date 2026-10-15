@@ -1,4 +1,4 @@
-package api
+package main
 
 import (
 	"context"
@@ -13,8 +13,35 @@ import (
 	"time"
 
 	"github.com/iamonah/drift/config"
+	"github.com/iamonah/drift/internal/infra/database/driftdb"
+
+	"github.com/iamonah/drift/internal/infra/s3"
+	"github.com/iamonah/drift/internal/infra/sqs"
+	"github.com/iamonah/drift/internal/util"
 	"github.com/rs/zerolog"
 )
+
+type App struct {
+	cfg      *config.Config
+	Store    *driftdb.Store
+	log      zerolog.Logger
+	jwtMaker util.TokenMaker
+	awsS3    s3.ObjectStorage
+	awsSQS   sqs.Queue
+}
+
+func NewApp(cfg *config.Config, store *driftdb.Store, log zerolog.Logger, objectStorage s3.ObjectStorage, queue sqs.Queue) *App {
+	jwtMaker := util.NewJWTMaker(cfg.JWT.SecretKey)
+
+	return &App{
+		cfg:      cfg,
+		Store:    store,
+		log:      log,
+		jwtMaker: &jwtMaker,
+		awsS3:    objectStorage,
+		awsSQS:   queue,
+	}
+}
 
 func (app *App) Serve() error {
 	errorlog := zerolog.New(app.log).With().Str("component", "http").Logger()

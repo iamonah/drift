@@ -5,10 +5,14 @@ import (
 	"os"
 	"time"
 
-	"github.com/iamonah/drift/cmd/api"
+	awscfg "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/iamonah/drift/config"
-	"github.com/iamonah/drift/internal/database"
-	"github.com/iamonah/drift/internal/database/driftdb"
+
+	"github.com/iamonah/drift/internal/infra/database"
+	"github.com/iamonah/drift/internal/infra/database/driftdb"
+	objectstorage "github.com/iamonah/drift/internal/infra/s3"
+	queue "github.com/iamonah/drift/internal/infra/sqs"
+
 	"github.com/rs/zerolog"
 )
 
@@ -41,7 +45,15 @@ func main() {
 
 	store := driftdb.NewStore(db.Client)
 
-	api := api.NewApp(cfg, store, log)
+	sdkConfig, err := awscfg.LoadDefaultConfig(ctx)
+	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to load AWS config")
+	}
+
+	s3Actions := objectstorage.NewS3Actions(sdkConfig, cfg.AWSS3.BaseURL)
+	sqs := queue.NewSQSActions(sdkConfig, cfg.AWSSQS.BaseURL)
+
+	api := NewApp(cfg, store, log, s3Actions, sqs)
 	err = api.Serve()
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to serve API")
