@@ -20,7 +20,7 @@ func (a *App) mux() http.Handler {
 	r.HandleFunc("/api/v1/auth/refresh", a.RefreshToken()).Methods(http.MethodPost)
 
 	r.HandleFunc("/api/v1/reports", authenticated(a.CreateReport())).Methods(http.MethodPost)
-	r.HandleFunc("/api/v1/reports/{report_id}", authenticated(a.GetReportByID())).Methods(http.MethodGet)
+	r.HandleFunc("/api/v1/reports/{report_id}", authenticated(a.GetReportByUserID())).Methods(http.MethodGet)
 
 	return midd.Chain(r.ServeHTTP, midd.RecoverPanic(&a.log), logged, midd.EnableCors(a.cfg))
 }

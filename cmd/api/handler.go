@@ -231,7 +231,7 @@ func (a *App) RefreshToken() http.HandlerFunc {
 	})
 }
 
-func (a *App) GetReportByID() http.HandlerFunc {
+func (a *App) GetReportByUserID() http.HandlerFunc {
 	return a.handler(func(w http.ResponseWriter, r *http.Request) error {
 		vars := mux.Vars(r)
 		reportID := vars["report_id"]
