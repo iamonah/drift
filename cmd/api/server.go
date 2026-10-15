@@ -28,9 +28,10 @@ type App struct {
 	jwtMaker util.TokenMaker
 	awsS3    s3.ObjectStorage
 	awsSQS   sqs.Queue
+	queueURL string
 }
 
-func NewApp(cfg *config.Config, store *driftdb.Store, log zerolog.Logger, objectStorage s3.ObjectStorage, queue sqs.Queue) *App {
+func NewApp(cfg *config.Config, store *driftdb.Store, log zerolog.Logger, objectStorage s3.ObjectStorage, queue sqs.Queue, queueURL string) *App {
 	jwtMaker := util.NewJWTMaker(cfg.JWT.SecretKey)
 
 	return &App{
@@ -40,6 +41,7 @@ func NewApp(cfg *config.Config, store *driftdb.Store, log zerolog.Logger, object
 		jwtMaker: &jwtMaker,
 		awsS3:    objectStorage,
 		awsSQS:   queue,
+		queueURL: queueURL,
 	}
 }
 

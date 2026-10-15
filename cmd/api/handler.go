@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 	"uuid"
@@ -10,6 +11,7 @@ import (
 	"github.com/gorilla/mux"
 	cfg "github.com/iamonah/drift/config"
 	"github.com/iamonah/drift/internal/infra/database/driftdb"
+	"github.com/iamonah/drift/internal/job"
 	"github.com/iamonah/drift/internal/util"
 )
 
@@ -256,11 +258,55 @@ func (a *App) GetReportByID() http.HandlerFunc {
 	})
 }
 
+type createReportRequest struct {
+	ReportType string `json:"report_type" validate:"required"`
+}
+
+type createReportResponse struct {
+	ID     uuid.UUID `json:"id"`
+	Status string    `json:"status"`
+}
+
 func (a *App) CreateReport() http.HandlerFunc {
 	return a.handler(func(w http.ResponseWriter, r *http.Request) error {
-		// Placeholder for the reports handler logic
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Reports endpoint"))
+		payload, err := GetJWTPayloadCTX(r)
+		if err != nil {
+			return util.NewError(http.StatusUnauthorized, errors.New("unauthorized"))
+		}
+
+		var req createReportRequest
+		if err := util.ReadJSON(r, &req); err != nil {
+			return util.NewError(http.StatusBadRequest, errors.New("invalid request payload"))
+		}
+		if err := util.NewValidate(req); err != nil {
+			return util.NewError(http.StatusBadRequest, err)
+		}
+
+		report := driftdb.Report{
+			UserID:     payload.UserID,
+			ID:         uuid.New(),
+			ReportType: req.ReportType,
+		}
+		if err := a.Store.ReportStore.CreateReport(r.Context(), report); err != nil {
+			return err
+		}
+
+		_, err = a.awsSQS.SendMessage(r.Context(), a.queueURL, job.Report{
+			ID:     report.ID,
+			UserID: report.UserID,
+			Type:   report.ReportType,
+		}, nil)
+		if err != nil {
+			// Keep the row from sitting as pending forever when the enqueue fails.
+			if markErr := a.Store.ReportStore.MarkFailed(r.Context(), report.UserID, report.ID, "failed to enqueue report"); markErr != nil {
+				a.log.Error().Err(markErr).Str("report_id", report.ID.String()).Msg("failed to mark report as failed")
+			}
+			return fmt.Errorf("enqueue report %s: %w", report.ID, err)
+		}
+
+		a.log.Info().Str("report_id", report.ID.String()).Str("user_id", payload.UserID.String()).Msg("report queued")
+
+		a.writeJSON(w, http.StatusAccepted, createReportResponse{ID: report.ID, Status: "queued"})
 		return nil
 	})
 }

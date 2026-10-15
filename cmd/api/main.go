@@ -25,20 +25,20 @@ func main() {
 		log.Fatal().Err(err).Msg("Failed to load config")
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	db, err := database.NewDB(&cfg.DB)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to create database")
 	}
+	defer db.Client.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	err = db.Ping(ctx)
-	if err != nil {
+	if err := db.Ping(ctx); err != nil {
 		log.Fatal().Err(err).Msg("Failed to ping database")
 	}
 
-	err = database.MigrateDB(db)
-	if err != nil {
+	if err := database.MigrateDB(db); err != nil {
 		log.Fatal().Err(err).Msg("Failed to migrate database")
 	}
 	log.Info().Msg("database migration completed successfully")
@@ -51,11 +51,15 @@ func main() {
 	}
 
 	s3Actions := objectstorage.NewS3Actions(sdkConfig, cfg.AWSS3.BaseURL)
-	sqs := queue.NewSQSActions(sdkConfig, cfg.AWSSQS.BaseURL)
+	queueActions := queue.NewSQSActions(sdkConfig, cfg.AWSSQS.BaseURL)
 
-	api := NewApp(cfg, store, log, s3Actions, sqs)
-	err = api.Serve()
+	queueURL, err := queueActions.GetQueueURL(ctx, cfg.AWSSQS.QueueName)
 	if err != nil {
+		log.Fatal().Err(err).Msg("Failed to resolve the reports queue URL")
+	}
+
+	api := NewApp(cfg, store, log, s3Actions, queueActions, queueURL)
+	if err := api.Serve(); err != nil {
 		log.Fatal().Err(err).Msg("Failed to serve API")
 	}
 }
