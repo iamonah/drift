@@ -2,6 +2,7 @@ package midd
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -50,39 +51,40 @@ const (
 	AuthContextPayloadKey   bearerTokenKey = "authorization_payload"
 )
 
-func AuthBearerToken(log *zerolog.Logger, tokenMaker util.TokenMaker) Middleware {
+func AuthBearerToken(tokenMaker util.TokenMaker) Middleware {
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get(string(AuthHeaderAuthorization))
 			if authHeader == "" {
-				util.WriteJSON(w, http.StatusUnauthorized, "missing authorization header")
+				unauthorized(w, "missing authorization header")
 				return
 			}
 
 			val := strings.Fields(authHeader)
 			if len(val) != 2 || strings.ToLower(val[0]) != string(AuthTypeBearer) {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				util.WriteJSON(w, http.StatusUnauthorized, "invalid authorization header format")
+				unauthorized(w, "invalid authorization header format")
 				return
 			}
 
-			authHeader = val[1]
-			token, err := tokenMaker.VerifyToken(authHeader)
+			payload, err := tokenMaker.VerifyToken(val[1])
 			if err != nil {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				util.WriteJSON(w, http.StatusUnauthorized, "invalid or expired token")
+				unauthorized(w, "invalid or expired token")
 				return
 			}
-			if token.TokenType != util.TokenTypeAccess {
-				w.Header().Set("WWW-Authenticate", "Bearer")
-				util.WriteJSON(w, http.StatusUnauthorized, "invalid access token")
+			if payload.TokenType != util.TokenTypeAccess {
+				unauthorized(w, "invalid access token")
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), AuthContextPayloadKey, token)
+			ctx := context.WithValue(r.Context(), AuthContextPayloadKey, payload)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func unauthorized(w http.ResponseWriter, message string) {
+	w.Header().Set("WWW-Authenticate", "Bearer")
+	_ = util.WriteJSON(w, http.StatusUnauthorized, util.NewError(http.StatusUnauthorized, errors.New(message)))
 }
 
 const origin = "Origin"
@@ -95,26 +97,35 @@ func EnableCors(cfg *config.Config) Middleware {
 			w.Header().Add("Vary", "Access-Control-Request-Headers")
 
 			origin := r.Header.Get(origin)
-
-			if origin != "" {
-				for _, o := range cfg.Server.CORSAllowedOrigins {
-					if strings.TrimSpace(o) == origin {
-						w.Header().Set("Access-Control-Allow-Origin", origin)
-
-						if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
-							w.Header().Set("Access-Control-Allow-Methods", "OPTIONS, POST, GET, PUT, PATCH, DELETE")
-							w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type")
-							w.Header().Set("Access-Control-Max-Age", "300")
-							w.WriteHeader(http.StatusNoContent)
-							return
-						}
-						break
-					}
-				}
+			allowed := origin != "" && isAllowedOrigin(cfg, origin)
+			if allowed {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
 			}
+
+			// Answer every preflight, including ones from origins we do not allow,
+			// so the browser gets a clear CORS error rather than a 405.
+			if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+				if allowed {
+					w.Header().Set("Access-Control-Allow-Methods", "OPTIONS, POST, GET, PUT, PATCH, DELETE")
+					w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type")
+					w.Header().Set("Access-Control-Max-Age", "300")
+				}
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func isAllowedOrigin(cfg *config.Config, origin string) bool {
+	for _, allowed := range cfg.Server.CORSAllowedOrigins {
+		if strings.TrimSpace(allowed) == origin {
+			return true
+		}
+	}
+	return false
 }
 
 type RequestID struct{}

@@ -6,8 +6,11 @@ import (
 	"net/http"
 )
 
+const maxBodyBytes = 1 << 20 // 1 MiB
+
 func ReadJSON[T any](r *http.Request, v *T) error {
 	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(nil, r.Body, maxBodyBytes)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 

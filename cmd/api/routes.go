@@ -12,7 +12,7 @@ import (
 func (a *App) mux() http.Handler {
 	r := mux.NewRouter()
 	logged := midd.Logger(&a.log)
-	authenticated := midd.AuthBearerToken(&a.log, a.jwtMaker)
+	authenticated := midd.AuthBearerToken(a.jwtMaker)
 
 	r.HandleFunc("/health", a.handler(a.HealthCheckHandler)).Methods(http.MethodGet)
 	r.HandleFunc("/api/v1/auth/signup", a.SignUp()).Methods(http.MethodPost)
