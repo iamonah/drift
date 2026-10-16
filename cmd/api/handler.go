@@ -284,7 +284,7 @@ func (a *App) GetReportByUserID() http.HandlerFunc {
 			return util.NewError(http.StatusUnauthorized, errors.New("unauthorized"))
 		}
 
-		report, err := a.Store.ReportStore.GetReport(r.Context(), payload.UserID, uuidReportID)
+		report, err := a.Store.ReportStore.GetReportByUserID(r.Context(), payload.UserID, uuidReportID)
 		if err != nil {
 			if errors.Is(err, driftdb.ErrReportNotFound) {
 				return util.NewError(http.StatusNotFound, errors.New("report not found"))

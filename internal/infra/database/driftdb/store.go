@@ -8,8 +8,8 @@ import (
 
 type reportStore interface {
 	CreateReport(ctx context.Context, report Report) error
-	GetReport(ctx context.Context, userID uuid.UUID, id uuid.UUID) (Report, error)
-	GetReportsByUser(ctx context.Context, userID uuid.UUID) ([]Report, error)
+	GetReportByUserID(ctx context.Context, userID uuid.UUID, id uuid.UUID) (Report, error)
+	// GetReportsByUser(ctx context.Context, userID uuid.UUID) ([]Report, error)
 	MarkStarted(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
 	MarkFailed(ctx context.Context, userID uuid.UUID, id uuid.UUID, errorMessage string) error
 	MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.UUID, outputObjectKey string) error

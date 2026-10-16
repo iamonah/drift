@@ -59,20 +59,6 @@ type Report struct {
 	CompletedAt     sql.NullTime
 }
 
-// reportColumns keeps the projection in sync between the single and list reads.
-const reportColumns = `
-	user_id,
-	id,
-	report_type,
-	status,
-	output_object_key,
-	error_message,
-	created_at,
-	started_at,
-	failed_at,
-	completed_at
-`
-
 func scanReport(row interface{ Scan(dest ...any) error }) (Report, error) {
 	var report Report
 	err := row.Scan(
@@ -106,9 +92,19 @@ func (d *ReportDB) CreateReport(ctx context.Context, report Report) error {
 	return nil
 }
 
-func (d *ReportDB) GetReport(ctx context.Context, userID uuid.UUID, id uuid.UUID) (Report, error) {
+func (d *ReportDB) GetReportByUserID(ctx context.Context, userID uuid.UUID, id uuid.UUID) (Report, error) {
 	stmt := `
-		SELECT ` + reportColumns + `
+		SELECT 	
+		user_id,
+		id,
+		report_type,
+		status,
+		output_object_key,
+		error_message,
+		created_at,
+		started_at,
+		failed_at,
+		completed_at
 		FROM reports
 		WHERE user_id = $1 AND id = $2
 	`
@@ -124,46 +120,54 @@ func (d *ReportDB) GetReport(ctx context.Context, userID uuid.UUID, id uuid.UUID
 	return report, nil
 }
 
-func (d *ReportDB) GetReportsByUser(ctx context.Context, userID uuid.UUID) ([]Report, error) {
-	stmt := `
-		SELECT ` + reportColumns + `
-		FROM reports
-		WHERE user_id = $1
-		ORDER BY created_at DESC
-	`
+// func (d *ReportDB) GetReportsByUser(ctx context.Context, userID uuid.UUID) ([]Report, error) {
+// 	stmt := `
+// 		SELECT
+// 		user_id,
+// 		id,
+// 		report_type,
+// 		status,
+// 		output_object_key,
+// 		error_message,
+// 		created_at,
+// 		started_at,
+// 		failed_at,
+// 		completed_at
+// 		FROM reports
+// 		WHERE user_id = $1
+// 		ORDER BY created_at DESC
+// 	`
 
-	rows, err := d.db.QueryContext(ctx, stmt, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+// 	rows, err := d.db.QueryContext(ctx, stmt, userID)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	defer rows.Close()
 
-	var userReports []Report
+// 	var userReports []Report
 
-	for rows.Next() {
-		report, err := scanReport(rows)
-		if err != nil {
-			return nil, err
-		}
+// 	for rows.Next() {
+// 		report, err := scanReport(rows)
+// 		if err != nil {
+// 			return nil, err
+// 		}
 
-		userReports = append(userReports, report)
-	}
+// 		userReports = append(userReports, report)
+// 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
+// 	if err := rows.Err(); err != nil {
+// 		return nil, err
+// 	}
 
-	return userReports, nil
-}
+// 	return userReports, nil
+// }
 
 func (d *ReportDB) MarkStarted(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
 	stmt := `
-		UPDATE reports
-		SET
-			status = $3,
-			started_at = CURRENT_TIMESTAMP
-		WHERE user_id = $1
-		  AND id = $2
+		UPDATE reports SET
+		status = $3,
+		started_at = CURRENT_TIMESTAMP
+		WHERE user_id = $1 AND id = $2
 	`
 
 	_, err := d.db.ExecContext(ctx, stmt, userID, id, string(ReportStatusProcessing))
@@ -172,41 +176,32 @@ func (d *ReportDB) MarkStarted(ctx context.Context, userID uuid.UUID, id uuid.UU
 
 func (d *ReportDB) MarkFailed(ctx context.Context, userID uuid.UUID, id uuid.UUID, errorMessage string) error {
 	stmt := `
-		UPDATE reports
-		SET
-			status = $3,
-			failed_at = CURRENT_TIMESTAMP,
-			error_message = $4
-		WHERE user_id = $1
-		  AND id = $2
+		UPDATE reports SET
+		status = $3,
+		failed_at = CURRENT_TIMESTAMP,
+		error_message = $4
+		WHERE user_id = $1 AND id = $2
 	`
-
 	_, err := d.db.ExecContext(ctx, stmt, userID, id, string(ReportStatusFailed), errorMessage)
 	return err
 }
 
 func (d *ReportDB) MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.UUID, outputObjectKey string) error {
 	stmt := `
-		UPDATE reports
-		SET
-			status = $3,
-			completed_at = CURRENT_TIMESTAMP,
-			output_object_key = $4
-		WHERE user_id = $1
-		  AND id = $2
+		UPDATE reports SET
+		status = $3,
+		completed_at = CURRENT_TIMESTAMP,
+		output_object_key = $4
+		WHERE user_id = $1 AND id = $2
 	`
-
 	_, err := d.db.ExecContext(ctx, stmt, userID, id, string(ReportStatusCompleted), outputObjectKey)
 	return err
 }
 
 func (d *ReportDB) Delete(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
 	stmt := `
-		DELETE FROM reports
-		WHERE user_id = $1
-		  AND id = $2
+		DELETE FROM reports	WHERE user_id = $1 AND id = $2
 	`
-
 	_, err := d.db.ExecContext(ctx, stmt, userID, id)
 	return err
 }
