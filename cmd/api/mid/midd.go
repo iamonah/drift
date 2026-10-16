@@ -24,12 +24,14 @@ func Chain(h http.HandlerFunc, middlewares ...Middleware) http.HandlerFunc {
 	return h
 }
 
-func RecoverPanic(log *zerolog.Logger) Middleware {
+// RecoverPanic turns a panic in a downstream handler into a 500. It logs through
+// the request-scoped logger, so it must sit inside Logger in the chain.
+func RecoverPanic() Middleware {
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if rec := recover(); rec != nil {
-					log.Error().
+					zerolog.Ctx(r.Context()).Error().
 						Any("panic", rec).
 						Bytes("stack", debug.Stack()).
 						Msg("panic recovered")

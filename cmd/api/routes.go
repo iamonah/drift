@@ -22,7 +22,10 @@ func (a *App) mux() http.Handler {
 	r.HandleFunc("/api/v1/reports", authenticated(a.CreateReport())).Methods(http.MethodPost)
 	r.HandleFunc("/api/v1/reports/{report_id}", authenticated(a.GetReportByUserID())).Methods(http.MethodGet)
 
-	return midd.Chain(r.ServeHTTP, midd.RecoverPanic(&a.log), logged, midd.EnableCors(a.cfg))
+	// Logger is outermost so the request-scoped logger is in the context before
+	// RecoverPanic runs; RecoverPanic sits inside it so a panic is logged (and
+	// answered) before the access-log line is written.
+	return midd.Chain(r.ServeHTTP, logged, midd.RecoverPanic(), midd.EnableCors(a.cfg))
 }
 
 func (a *App) HealthCheckHandler(w http.ResponseWriter, r *http.Request) error {
