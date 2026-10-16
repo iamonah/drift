@@ -24,13 +24,13 @@ CREATE TABLE reports (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     id UUID NOT NULL,
     report_type VARCHAR NOT NULL,
-    output_file_path VARCHAR,
-    download_url VARCHAR,
-    download_url_expires_at TIMESTAMPTZ,
-    error_message VARCHAR,
+    status VARCHAR NOT NULL DEFAULT 'pending',
+    output_object_key VARCHAR,
+    error_message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     started_at TIMESTAMPTZ,
     failed_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
-    PRIMARY KEY (user_id, id)
+    PRIMARY KEY (user_id, id),
+    CONSTRAINT reports_status_check CHECK (status IN ('pending', 'processing', 'completed', 'failed'))
 );
