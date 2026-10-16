@@ -45,6 +45,12 @@ func NewApp(cfg *config.Config, store *driftdb.Store, log zerolog.Logger, object
 	}
 }
 
+// logger returns the request-scoped logger set by the Logger middleware: the
+// app logger with the request_id attached.
+func (a *App) logger(r *http.Request) *zerolog.Logger {
+	return zerolog.Ctx(r.Context())
+}
+
 func (app *App) Serve() error {
 	errorlog := zerolog.New(app.log).With().Str("component", "http").Logger()
 

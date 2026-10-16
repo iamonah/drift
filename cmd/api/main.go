@@ -19,6 +19,9 @@ import (
 func main() {
 	zerolog.TimeFieldFormat = time.RFC3339Nano
 	log := zerolog.New(os.Stderr).With().Timestamp().Logger()
+	// Fall back to this logger when a context carries no request-scoped logger,
+	// so zerolog.Ctx never hands back a logger that silently discards output.
+	zerolog.DefaultContextLogger = &log
 
 	cfg, err := config.LoadConfig()
 	if err != nil {

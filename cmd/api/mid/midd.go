@@ -128,10 +128,6 @@ func isAllowedOrigin(cfg *config.Config, origin string) bool {
 	return false
 }
 
-type RequestID struct{}
-
-var RequestIdKey = RequestID{}
-
 type ResponseWriter struct {
 	http.ResponseWriter
 	StatusCode    int
@@ -167,22 +163,29 @@ func (m *ResponseWriter) Unwrap() http.ResponseWriter {
 	return m.ResponseWriter
 }
 
+func requestID(r *http.Request) string {
+	if id := r.Header.Get("X-Request-ID"); id != "" {
+		return id
+	}
+	return uuid.New().String()
+}
+
 func Logger(log *zerolog.Logger) Middleware {
 	return func(next http.HandlerFunc) http.HandlerFunc {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 			ip := r.RemoteAddr
-			reqID := r.Header.Get("X-Request-ID")
-			if reqID == "" {
-				reqID = uuid.New().String()
-			}
-			r = r.WithContext(context.WithValue(r.Context(), RequestIdKey, reqID))
+			reqID := requestID(r)
+
+			// Attach a request-scoped logger so every line logged downstream
+			// carries the same request_id.
+			reqLog := log.With().Str("request_id", reqID).Logger()
+			r = r.WithContext(reqLog.WithContext(r.Context()))
 
 			w.Header().Set("X-Request-ID", reqID)
 			nwr := NewResponseWriter(w)
 			defer func() {
-				log.Info().
-					Str("request_id", reqID).
+				reqLog.Info().
 					Str("method", r.Method).
 					Str("url", r.URL.Path).
 					Str("client_ip", ip).
