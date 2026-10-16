@@ -33,21 +33,22 @@ func (a *App) HealthCheckHandler(w http.ResponseWriter, r *http.Request) error {
 
 func (a *App) handler(f func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		log := a.logger(r)
 		if err := f(w, r); err != nil {
 			var appErr *util.AppError
 			if errors.As(err, &appErr) {
 				if err = util.WriteJSON(w, appErr.Code, appErr); err != nil {
-					a.log.Error().Err(err).Str("method", r.Method).Str("path", r.URL.Path).
+					log.Error().Err(err).Str("method", r.Method).Str("path", r.URL.Path).
 						Msg("failed to write error response")
 				}
 				return
 			}
 
-			a.log.Error().Err(err).Str("method", r.Method).Str("path", r.URL.Path).Msg("unhandled request error")
+			log.Error().Err(err).Str("method", r.Method).Str("path", r.URL.Path).Msg("unhandled request error")
 
 			if writeErr := util.WriteJSON(w, http.StatusInternalServerError,
 				util.NewError(http.StatusInternalServerError, errors.New(http.StatusText(http.StatusInternalServerError)))); writeErr != nil {
-				a.log.Error().Err(writeErr).Msg("failed to write error response")
+				log.Error().Err(writeErr).Msg("failed to write error response")
 			}
 		}
 	}

@@ -68,8 +68,8 @@ func (a *App) SignUp() http.HandlerFunc {
 			return err
 		}
 
-		a.log.Info().Str("user_id", user.ID.String()).Msg("user created")
-		a.writeJSON(w, http.StatusCreated, userResponse{
+		a.logger(r).Info().Str("user_id", user.ID.String()).Msg("user created")
+		a.writeJSON(r, w, http.StatusCreated, userResponse{
 			ID:        user.ID,
 			Email:     user.Email,
 			CreatedAt: user.CreatedAt,
@@ -106,8 +106,8 @@ func (a *App) SignIn() http.HandlerFunc {
 			return err
 		}
 
-		a.log.Info().Str("user_id", user.ID.String()).Msg("user signed in")
-		a.writeJSON(w, http.StatusOK, signInResponse{
+		a.logger(r).Info().Str("user_id", user.ID.String()).Msg("user signed in")
+		a.writeJSON(r, w, http.StatusOK, signInResponse{
 			User: userResponse{
 				ID:        user.ID,
 				Email:     user.Email,
@@ -173,9 +173,9 @@ func (a *App) createSession(r *http.Request, userID uuid.UUID, store *driftdb.St
 	}, nil
 }
 
-func (a *App) writeJSON(w http.ResponseWriter, status int, body any) {
+func (a *App) writeJSON(r *http.Request, w http.ResponseWriter, status int, body any) {
 	if err := util.WriteJSON(w, status, body); err != nil {
-		a.log.Error().Err(err).Msg("failed to write JSON response")
+		a.logger(r).Error().Err(err).Msg("failed to write JSON response")
 	}
 }
 
@@ -225,8 +225,8 @@ func (a *App) RefreshToken() http.HandlerFunc {
 			return err
 		}
 
-		a.log.Info().Str("user_id", payload.UserID.String()).Msg("refresh token used")
-		a.writeJSON(w, http.StatusOK, tokenResp)
+		a.logger(r).Info().Str("user_id", payload.UserID.String()).Msg("refresh token used")
+		a.writeJSON(r, w, http.StatusOK, tokenResp)
 		return nil
 	})
 }
@@ -292,7 +292,7 @@ func (a *App) GetReportByUserID() http.HandlerFunc {
 			return err
 		}
 
-		a.writeJSON(w, http.StatusOK, newReportResponse(report))
+		a.writeJSON(r, w, http.StatusOK, newReportResponse(report))
 		return nil
 	})
 }
@@ -338,14 +338,14 @@ func (a *App) CreateReport() http.HandlerFunc {
 		if err != nil {
 			// Keep the row from sitting as pending forever when the enqueue fails.
 			if markErr := a.Store.ReportStore.MarkFailed(r.Context(), report.UserID, report.ID, "failed to enqueue report"); markErr != nil {
-				a.log.Error().Err(markErr).Str("report_id", report.ID.String()).Msg("failed to mark report as failed")
+				a.logger(r).Error().Err(markErr).Str("report_id", report.ID.String()).Msg("failed to mark report as failed")
 			}
 			return fmt.Errorf("enqueue report %s: %w", report.ID, err)
 		}
 
-		a.log.Info().Str("report_id", report.ID.String()).Str("user_id", payload.UserID.String()).Msg("report queued")
+		a.logger(r).Info().Str("report_id", report.ID.String()).Str("user_id", payload.UserID.String()).Msg("report queued")
 
-		a.writeJSON(w, http.StatusAccepted, createReportResponse{ID: report.ID, Status: "queued"})
+		a.writeJSON(r, w, http.StatusAccepted, createReportResponse{ID: report.ID, Status: "queued"})
 		return nil
 	})
 }
