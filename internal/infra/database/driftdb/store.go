@@ -3,7 +3,6 @@ package driftdb
 import (
 	"context"
 	"database/sql"
-	"time"
 	"uuid"
 )
 
@@ -13,7 +12,7 @@ type reportStore interface {
 	GetReportsByUser(ctx context.Context, userID uuid.UUID) ([]Report, error)
 	MarkStarted(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
 	MarkFailed(ctx context.Context, userID uuid.UUID, id uuid.UUID, errorMessage string) error
-	MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.UUID, outputFilePath string, downloadURL string, expiresAt time.Time) error
+	MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.UUID, outputObjectKey string) error
 	Delete(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
 }
 

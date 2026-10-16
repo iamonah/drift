@@ -3,7 +3,6 @@ package driftdb
 import (
 	"context"
 	"testing"
-	"time"
 
 	"uuid"
 
@@ -42,10 +41,10 @@ func TestReportDB_CreateReport(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, report.ID, retrieved.ID)
 	assert.Equal(t, report.ReportType, retrieved.ReportType)
+	assert.Equal(t, ReportStatusPending, retrieved.Status)
 }
 
 func TestReportDB_CreateReport_Duplicate(t *testing.T) {
-
 	user := createTestUser(t)
 	report := createTestReport(t, user.ID)
 
@@ -55,7 +54,6 @@ func TestReportDB_CreateReport_Duplicate(t *testing.T) {
 }
 
 func TestReportDB_GetReport(t *testing.T) {
-
 	user := createTestUser(t)
 	report := createTestReport(t, user.ID)
 
@@ -67,13 +65,11 @@ func TestReportDB_GetReport(t *testing.T) {
 }
 
 func TestReportDB_GetReport_NotFound(t *testing.T) {
-
 	_, err := testReportDB.GetReport(context.Background(), uuid.New(), uuid.New())
 	assert.Error(t, err)
 }
 
 func TestReportDB_GetReportsByUser(t *testing.T) {
-
 	user := createTestUser(t)
 	report1 := createTestReport(t, user.ID)
 	report2 := createTestReport(t, user.ID)
@@ -92,7 +88,6 @@ func TestReportDB_GetReportsByUser(t *testing.T) {
 }
 
 func TestReportDB_MarkStarted(t *testing.T) {
-
 	user := createTestUser(t)
 	report := createTestReport(t, user.ID)
 
@@ -102,42 +97,39 @@ func TestReportDB_MarkStarted(t *testing.T) {
 	retrieved, err := testReportDB.GetReport(context.Background(), report.UserID, report.ID)
 	require.NoError(t, err)
 	assert.True(t, retrieved.StartedAt.Valid)
+	assert.Equal(t, ReportStatusProcessing, retrieved.Status)
 }
 
 func TestReportDB_MarkFailed(t *testing.T) {
-
 	user := createTestUser(t)
 	report := createTestReport(t, user.ID)
+
 	err := testReportDB.MarkFailed(context.Background(), report.UserID, report.ID, "file processing failed")
 	require.NoError(t, err)
 
 	retrieved, err := testReportDB.GetReport(context.Background(), report.UserID, report.ID)
 	require.NoError(t, err)
 	assert.True(t, retrieved.FailedAt.Valid)
+	assert.Equal(t, ReportStatusFailed, retrieved.Status)
 	assert.Equal(t, "file processing failed", retrieved.ErrorMessage.String)
 }
 
 func TestReportDB_MarkCompleted(t *testing.T) {
-
 	user := createTestUser(t)
 	report := createTestReport(t, user.ID)
-	filePath := "/reports/test.pdf"
-	downloadURL := "https://example.com/download/test"
-	expiresAt := time.Now().Add(24 * time.Hour)
+	objectKey := "reports/test.pdf"
 
-	err := testReportDB.MarkCompleted(context.Background(), report.UserID, report.ID, filePath, downloadURL, expiresAt)
+	err := testReportDB.MarkCompleted(context.Background(), report.UserID, report.ID, objectKey)
 	require.NoError(t, err)
 
 	retrieved, err := testReportDB.GetReport(context.Background(), report.UserID, report.ID)
 	require.NoError(t, err)
 	assert.True(t, retrieved.CompletedAt.Valid)
-	assert.Equal(t, filePath, retrieved.OutputFilePath.String)
-	assert.Equal(t, downloadURL, retrieved.DownloadURL.String)
-
+	assert.Equal(t, ReportStatusCompleted, retrieved.Status)
+	assert.Equal(t, objectKey, retrieved.OutputObjectKey.String)
 }
 
 func TestReportDB_Delete(t *testing.T) {
-
 	user := createTestUser(t)
 	report := createTestReport(t, user.ID)
 
@@ -145,5 +137,16 @@ func TestReportDB_Delete(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = testReportDB.GetReport(context.Background(), report.UserID, report.ID)
+	assert.Error(t, err)
+}
+
+func TestCheckReportStatus(t *testing.T) {
+	for _, status := range []string{"pending", "processing", "completed", "failed"} {
+		got, err := CheckReportStatus(status)
+		require.NoError(t, err)
+		assert.Equal(t, ReportStatus(status), got)
+	}
+
+	_, err := CheckReportStatus("queued")
 	assert.Error(t, err)
 }

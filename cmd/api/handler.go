@@ -231,6 +231,45 @@ func (a *App) RefreshToken() http.HandlerFunc {
 	})
 }
 
+type reportResponse struct {
+	ID              uuid.UUID  `json:"id"`
+	ReportType      string     `json:"report_type"`
+	Status          string     `json:"status"`
+	OutputObjectKey *string    `json:"output_object_key,omitempty"`
+	ErrorMessage    *string    `json:"error_message,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	FailedAt        *time.Time `json:"failed_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+}
+
+func newReportResponse(report driftdb.Report) reportResponse {
+	resp := reportResponse{
+		ID:         report.ID,
+		ReportType: report.ReportType,
+		Status:     report.Status.String(),
+		CreatedAt:  report.CreatedAt,
+	}
+
+	if report.OutputObjectKey.Valid {
+		resp.OutputObjectKey = &report.OutputObjectKey.String
+	}
+	if report.ErrorMessage.Valid {
+		resp.ErrorMessage = &report.ErrorMessage.String
+	}
+	if report.StartedAt.Valid {
+		resp.StartedAt = &report.StartedAt.Time
+	}
+	if report.FailedAt.Valid {
+		resp.FailedAt = &report.FailedAt.Time
+	}
+	if report.CompletedAt.Valid {
+		resp.CompletedAt = &report.CompletedAt.Time
+	}
+
+	return resp
+}
+
 func (a *App) GetReportByUserID() http.HandlerFunc {
 	return a.handler(func(w http.ResponseWriter, r *http.Request) error {
 		vars := mux.Vars(r)
@@ -253,7 +292,7 @@ func (a *App) GetReportByUserID() http.HandlerFunc {
 			return err
 		}
 
-		a.writeJSON(w, http.StatusOK, report)
+		a.writeJSON(w, http.StatusOK, newReportResponse(report))
 		return nil
 	})
 }

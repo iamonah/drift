@@ -19,25 +19,83 @@ func NewReportDB(db *sql.DB) *ReportDB {
 	return &ReportDB{db: db}
 }
 
+type ReportStatus string
+
+var reportStatuses = map[string]ReportStatus{}
+
+var (
+	ReportStatusPending    = newReportStatus("pending")
+	ReportStatusProcessing = newReportStatus("processing")
+	ReportStatusCompleted  = newReportStatus("completed")
+	ReportStatusFailed     = newReportStatus("failed")
+)
+
+func newReportStatus(status string) ReportStatus {
+	if _, ok := reportStatuses[status]; !ok {
+		reportStatuses[status] = ReportStatus(status)
+	}
+	return reportStatuses[status]
+}
+
+func CheckReportStatus(status string) (ReportStatus, error) {
+	if s, ok := reportStatuses[status]; ok {
+		return s, nil
+	}
+	return "", fmt.Errorf("report status %q is not recognised", status)
+}
+
+func (s ReportStatus) String() string { return string(s) }
+
 type Report struct {
-	UserID               uuid.UUID
-	ID                   uuid.UUID
-	ReportType           string
-	OutputFilePath       sql.NullString
-	DownloadURL          sql.NullString
-	DownloadURLExpiresAt sql.NullTime
-	ErrorMessage         sql.NullString
-	CreatedAt            time.Time
-	StartedAt            sql.NullTime
-	FailedAt             sql.NullTime
-	CompletedAt          sql.NullTime
+	UserID          uuid.UUID
+	ID              uuid.UUID
+	ReportType      string
+	Status          ReportStatus
+	OutputObjectKey sql.NullString
+	ErrorMessage    sql.NullString
+	CreatedAt       time.Time
+	StartedAt       sql.NullTime
+	FailedAt        sql.NullTime
+	CompletedAt     sql.NullTime
+}
+
+// reportColumns keeps the projection in sync between the single and list reads.
+const reportColumns = `
+	user_id,
+	id,
+	report_type,
+	status,
+	output_object_key,
+	error_message,
+	created_at,
+	started_at,
+	failed_at,
+	completed_at
+`
+
+func scanReport(row interface{ Scan(dest ...any) error }) (Report, error) {
+	var report Report
+	err := row.Scan(
+		&report.UserID,
+		&report.ID,
+		&report.ReportType,
+		&report.Status,
+		&report.OutputObjectKey,
+		&report.ErrorMessage,
+		&report.CreatedAt,
+		&report.StartedAt,
+		&report.FailedAt,
+		&report.CompletedAt,
+	)
+	return report, err
 }
 
 func (d *ReportDB) CreateReport(ctx context.Context, report Report) error {
 	stmt := `
-		INSERT INTO reports (user_id,id,report_type) VALUES ($1, $2, $3)
+		INSERT INTO reports (user_id, id, report_type, status)
+		VALUES ($1, $2, $3, $4)
 	`
-	_, err := d.db.ExecContext(ctx, stmt, report.UserID, report.ID, report.ReportType)
+	_, err := d.db.ExecContext(ctx, stmt, report.UserID, report.ID, report.ReportType, string(ReportStatusPending))
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && string(pqErr.Code) == "23505" {
@@ -50,36 +108,12 @@ func (d *ReportDB) CreateReport(ctx context.Context, report Report) error {
 
 func (d *ReportDB) GetReport(ctx context.Context, userID uuid.UUID, id uuid.UUID) (Report, error) {
 	stmt := `
-		SELECT
-			user_id,
-			id,
-			report_type,
-			output_file_path,
-			download_url,
-			download_url_expires_at,
-			error_message,
-			created_at,
-			started_at,
-			failed_at,
-			completed_at
-		FROM reports WHERE user_id = $1 AND id = $2
+		SELECT ` + reportColumns + `
+		FROM reports
+		WHERE user_id = $1 AND id = $2
 	`
 
-	var report Report
-
-	err := d.db.QueryRowContext(ctx, stmt, userID, id).Scan(
-		&report.UserID,
-		&report.ID,
-		&report.ReportType,
-		&report.OutputFilePath,
-		&report.DownloadURL,
-		&report.DownloadURLExpiresAt,
-		&report.ErrorMessage,
-		&report.CreatedAt,
-		&report.StartedAt,
-		&report.FailedAt,
-		&report.CompletedAt,
-	)
+	report, err := scanReport(d.db.QueryRowContext(ctx, stmt, userID, id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return report, ErrReportNotFound
@@ -89,20 +123,10 @@ func (d *ReportDB) GetReport(ctx context.Context, userID uuid.UUID, id uuid.UUID
 
 	return report, nil
 }
+
 func (d *ReportDB) GetReportsByUser(ctx context.Context, userID uuid.UUID) ([]Report, error) {
 	stmt := `
-		SELECT
-			user_id,
-			id,
-			report_type,
-			output_file_path,
-			download_url,
-			download_url_expires_at,
-			error_message,
-			created_at,
-			started_at,
-			failed_at,
-			completed_at
+		SELECT ` + reportColumns + `
 		FROM reports
 		WHERE user_id = $1
 		ORDER BY created_at DESC
@@ -114,45 +138,35 @@ func (d *ReportDB) GetReportsByUser(ctx context.Context, userID uuid.UUID) ([]Re
 	}
 	defer rows.Close()
 
-	var reports []Report
+	var userReports []Report
 
 	for rows.Next() {
-		var report Report
-
-		err := rows.Scan(
-			&report.UserID,
-			&report.ID,
-			&report.ReportType,
-			&report.OutputFilePath,
-			&report.DownloadURL,
-			&report.DownloadURLExpiresAt,
-			&report.ErrorMessage,
-			&report.CreatedAt,
-			&report.StartedAt,
-			&report.FailedAt,
-			&report.CompletedAt,
-		)
+		report, err := scanReport(rows)
 		if err != nil {
 			return nil, err
 		}
 
-		reports = append(reports, report)
+		userReports = append(userReports, report)
 	}
 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 
-	return reports, nil
+	return userReports, nil
 }
+
 func (d *ReportDB) MarkStarted(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
 	stmt := `
 		UPDATE reports
-		SET started_at = CURRENT_TIMESTAMP
-		WHERE user_id = $1 AND id = $2
+		SET
+			status = $3,
+			started_at = CURRENT_TIMESTAMP
+		WHERE user_id = $1
+		  AND id = $2
 	`
 
-	_, err := d.db.ExecContext(ctx, stmt, userID, id)
+	_, err := d.db.ExecContext(ctx, stmt, userID, id, string(ReportStatusProcessing))
 	return err
 }
 
@@ -160,36 +174,29 @@ func (d *ReportDB) MarkFailed(ctx context.Context, userID uuid.UUID, id uuid.UUI
 	stmt := `
 		UPDATE reports
 		SET
+			status = $3,
 			failed_at = CURRENT_TIMESTAMP,
-			error_message = $3
+			error_message = $4
 		WHERE user_id = $1
 		  AND id = $2
 	`
 
-	_, err := d.db.ExecContext(ctx, stmt, userID, id, errorMessage)
+	_, err := d.db.ExecContext(ctx, stmt, userID, id, string(ReportStatusFailed), errorMessage)
 	return err
 }
 
-func (d *ReportDB) MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.UUID, outputFilePath string, downloadURL string, expiresAt time.Time) error {
+func (d *ReportDB) MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.UUID, outputObjectKey string) error {
 	stmt := `
 		UPDATE reports
 		SET
+			status = $3,
 			completed_at = CURRENT_TIMESTAMP,
-			output_file_path = $3,
-			download_url = $4,
-			download_url_expires_at = $5
+			output_object_key = $4
 		WHERE user_id = $1
 		  AND id = $2
 	`
 
-	_, err := d.db.ExecContext(ctx, stmt,
-		userID,
-		id,
-		outputFilePath,
-		downloadURL,
-		expiresAt,
-	)
-
+	_, err := d.db.ExecContext(ctx, stmt, userID, id, string(ReportStatusCompleted), outputObjectKey)
 	return err
 }
 
