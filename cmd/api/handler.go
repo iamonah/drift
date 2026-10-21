@@ -296,6 +296,43 @@ func (a *App) GetReportByUserID() http.HandlerFunc {
 	})
 }
 
+func (a *App) DownloadReport() http.HandlerFunc {
+	return a.handler(func(w http.ResponseWriter, r *http.Request) error {
+		vars := mux.Vars(r)
+		reportID := vars["report_id"]
+		uuidReportID, err := uuid.Parse(reportID)
+		if err != nil {
+			return util.NewError(http.StatusBadRequest, errors.New("invalid report ID"))
+		}
+
+		payload, err := GetJWTPayloadCTX(r)
+		if err != nil {
+			return util.NewError(http.StatusUnauthorized, errors.New("unauthorized"))
+		}
+
+		report, err := a.Store.ReportStore.GetReportByUserID(r.Context(), payload.UserID, uuidReportID)
+		if err != nil {
+			if errors.Is(err, driftdb.ErrReportNotFound) {
+				return util.NewError(http.StatusNotFound, errors.New("report not found"))
+			}
+			return err
+		}
+
+		if report.Status != driftdb.ReportStatusCompleted || !report.OutputObjectKey.Valid {
+			return util.NewError(http.StatusConflict, errors.New("report is not ready"))
+		}
+
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", report.ID.String()+".csv.gz"))
+
+		if err := a.ObjectStorage.DownloadObjectTo(r.Context(), a.cfg.AWSS3.BucketName, report.OutputObjectKey.String, w); err != nil {
+			return fmt.Errorf("download report: %w", err)
+		}
+
+		return nil
+	})
+}
+
 type createReportRequest struct {
 	ReportType string `json:"report_type" validate:"required"`
 }

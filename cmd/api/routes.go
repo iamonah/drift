@@ -4,28 +4,28 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/gorilla/mux"
 	midd "github.com/iamonah/drift/cmd/api/mid"
 	"github.com/iamonah/drift/internal/util"
 )
 
 func (a *App) mux() http.Handler {
-	r := mux.NewRouter()
 	logged := midd.Logger(&a.log)
 	authenticated := midd.AuthBearerToken(a.jwtMaker)
 
-	r.HandleFunc("/health", a.handler(a.HealthCheckHandler)).Methods(http.MethodGet)
-	r.HandleFunc("/api/v1/auth/signup", a.SignUp()).Methods(http.MethodPost)
-	r.HandleFunc("/api/v1/auth/signin", a.SignIn()).Methods(http.MethodPost)
-	r.HandleFunc("/api/v1/auth/refresh", a.RefreshToken()).Methods(http.MethodPost)
+	a.Handle(http.MethodGet, "/", a.handler(a.HealthCheckHandler))
+	a.Handle(http.MethodPost, "/api/v1/auth/signup", a.SignUp())
+	a.Handle(http.MethodPost, "/api/v1/auth/signin", a.SignIn())
+	a.Handle(http.MethodPost, "/api/v1/auth/refresh", a.RefreshToken())
 
-	r.HandleFunc("/api/v1/reports", authenticated(a.CreateReport())).Methods(http.MethodPost)
-	r.HandleFunc("/api/v1/reports/{report_id}", authenticated(a.GetReportByUserID())).Methods(http.MethodGet)
+	a.Handle(http.MethodPost, "/api/v1/reports", a.CreateReport(), authenticated)
+	a.Handle(http.MethodGet, "/api/v1/reports/{report_id}", a.GetReportByUserID(), authenticated)
+	a.Handle(http.MethodGet, "/api/v1/reports/{report_id}/download", a.DownloadReport(), authenticated)
+	return midd.Chain(a.router.ServeHTTP, midd.RecoverPanic(), logged, midd.EnableCors(a.cfg))
+}
 
-	// Logger is outermost so the request-scoped logger is in the context before
-	// RecoverPanic runs; RecoverPanic sits inside it so a panic is logged (and
-	// answered) before the access-log line is written.
-	return midd.Chain(r.ServeHTTP, logged, midd.RecoverPanic(), midd.EnableCors(a.cfg))
+func (a *App) Handle(method, pattern string, handler http.HandlerFunc, middle ...midd.Middleware) {
+	h := midd.Chain(handler, middle...)
+	a.router.HandleFunc(pattern, h).Methods(method)
 }
 
 func (a *App) HealthCheckHandler(w http.ResponseWriter, r *http.Request) error {

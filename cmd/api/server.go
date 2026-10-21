@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/iamonah/drift/config"
 	"github.com/iamonah/drift/internal/infra/database/driftdb"
-
 	"github.com/iamonah/drift/internal/infra/s3"
 	"github.com/iamonah/drift/internal/infra/sqs"
 	"github.com/iamonah/drift/internal/util"
@@ -22,26 +22,28 @@ import (
 )
 
 type App struct {
-	cfg      *config.Config
-	Store    *driftdb.Store
-	log      zerolog.Logger
-	jwtMaker util.TokenMaker
-	awsS3    s3.ObjectStorage
-	awsSQS   sqs.Queue
-	queueURL string
+	cfg           *config.Config
+	Store         *driftdb.Store
+	log           zerolog.Logger
+	jwtMaker      util.TokenMaker
+	awsSQS        sqs.Queue
+	queueURL      string
+	ObjectStorage s3.ObjectStorage
+	router        *mux.Router
 }
 
-func NewApp(cfg *config.Config, store *driftdb.Store, log zerolog.Logger, objectStorage s3.ObjectStorage, queue sqs.Queue, queueURL string) *App {
+func NewApp(cfg *config.Config, mux *mux.Router, store *driftdb.Store, log zerolog.Logger, queue sqs.Queue, queueURL string, objectStorage s3.ObjectStorage) *App {
 	jwtMaker := util.NewJWTMaker(cfg.JWT.SecretKey)
 
 	return &App{
-		cfg:      cfg,
-		Store:    store,
-		log:      log,
-		jwtMaker: &jwtMaker,
-		awsS3:    objectStorage,
-		awsSQS:   queue,
-		queueURL: queueURL,
+		cfg:           cfg,
+		Store:         store,
+		log:           log,
+		jwtMaker:      &jwtMaker,
+		awsSQS:        queue,
+		queueURL:      queueURL,
+		ObjectStorage: objectStorage,
+		router:        mux,
 	}
 }
 
