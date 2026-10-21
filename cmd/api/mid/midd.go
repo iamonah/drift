@@ -63,7 +63,7 @@ func AuthBearerToken(tokenMaker util.TokenMaker) Middleware {
 			}
 
 			val := strings.Fields(authHeader)
-			if len(val) != 2 || strings.ToLower(val[0]) != string(AuthTypeBearer) {
+			if len(val) != 2 || !strings.EqualFold(val[0], string(AuthTypeBearer)) {
 				unauthorized(w, "invalid authorization header format")
 				return
 			}
