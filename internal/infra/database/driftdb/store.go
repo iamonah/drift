@@ -3,6 +3,7 @@ package driftdb
 import (
 	"context"
 	"database/sql"
+	"time"
 	"uuid"
 )
 
@@ -10,7 +11,8 @@ type reportStore interface {
 	CreateReport(ctx context.Context, report Report) (Report, error)
 	GetReportByUserID(ctx context.Context, userID uuid.UUID, id uuid.UUID) (Report, error)
 	// GetReportsByUser(ctx context.Context, userID uuid.UUID) ([]Report, error)
-	MarkStarted(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
+	// MarkStarted(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
+	ClaimReport(ctx context.Context, userID uuid.UUID, id uuid.UUID, lease time.Duration) (*Report, error)
 	MarkFailed(ctx context.Context, userID uuid.UUID, id uuid.UUID, errorMessage string) error
 	MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.UUID, outputObjectKey string) error
 	Delete(ctx context.Context, userID uuid.UUID, id uuid.UUID) error

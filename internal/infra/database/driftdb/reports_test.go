@@ -3,12 +3,16 @@ package driftdb
 import (
 	"context"
 	"testing"
+	"time"
 
 	"uuid"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// testClaimLease keeps the claim tests independent of the worker's own lease.
+const testClaimLease = time.Minute
 
 func createTestReport(t *testing.T, userID uuid.UUID) Report {
 	t.Helper()
@@ -96,17 +100,98 @@ func TestReportDB_GetReport_NotFound(t *testing.T) {
 // 	assert.True(t, found2)
 // }
 
-func TestReportDB_MarkStarted(t *testing.T) {
+func TestReportDB_ClaimReport(t *testing.T) {
 	user := createTestUser(t)
 	report := createTestReport(t, user.ID)
 
-	err := testReportDB.MarkStarted(context.Background(), report.UserID, report.ID)
+	claimed, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
 	require.NoError(t, err)
+	require.NotNil(t, claimed)
+	assert.Equal(t, ReportStatusProcessing, claimed.Status)
+	assert.True(t, claimed.StartedAt.Valid)
 
 	retrieved, err := testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
 	require.NoError(t, err)
-	assert.True(t, retrieved.StartedAt.Valid)
 	assert.Equal(t, ReportStatusProcessing, retrieved.Status)
+	assert.True(t, retrieved.StartedAt.Valid)
+}
+
+func TestReportDB_ClaimReport_AlreadyClaimed(t *testing.T) {
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
+
+	first, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+
+	second, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	assert.ErrorIs(t, err, ErrReportProcessing)
+	assert.Nil(t, second, "a report must only be claimable once")
+}
+
+func TestReportDB_ClaimReport_StaleProcessing(t *testing.T) {
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
+
+	first, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+
+	// Simulate a worker that died mid-report, well past the test lease.
+	_, err = testDB.Exec(
+		`UPDATE reports SET started_at = CURRENT_TIMESTAMP - INTERVAL '2 minutes' WHERE user_id = $1 AND id = $2`,
+		report.UserID, report.ID,
+	)
+	require.NoError(t, err)
+
+	reclaimed, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	require.NotNil(t, reclaimed, "a stale processing report must be claimable again")
+	assert.Equal(t, ReportStatusProcessing, reclaimed.Status)
+}
+
+func TestReportDB_ClaimReport_NotFound(t *testing.T) {
+	claimed, err := testReportDB.ClaimReport(context.Background(), uuid.New(), uuid.New(), testClaimLease)
+	require.NoError(t, err)
+	assert.Nil(t, claimed)
+}
+
+func TestReportDB_ClaimReport_InvalidLease(t *testing.T) {
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
+
+	for _, lease := range []time.Duration{0, -time.Minute} {
+		claimed, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, lease)
+		assert.ErrorContains(t, err, "lease must be positive")
+		assert.Nil(t, claimed)
+	}
+
+	// A rejected lease must not have touched the report.
+	retrieved, err := testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
+	require.NoError(t, err)
+	assert.Equal(t, ReportStatusPending, retrieved.Status)
+}
+
+func TestReportDB_ClaimReport_ProcessingWithoutStartedAt(t *testing.T) {
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
+
+	first, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+
+	// A processing report with no start time cannot be aged, so it must not be
+	// left unclaimable forever.
+	_, err = testDB.Exec(
+		`UPDATE reports SET started_at = NULL WHERE user_id = $1 AND id = $2`,
+		report.UserID, report.ID,
+	)
+	require.NoError(t, err)
+
+	reclaimed, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	require.NotNil(t, reclaimed, "a processing report without a start time must be claimable")
+	assert.True(t, reclaimed.StartedAt.Valid)
 }
 
 func TestReportDB_MarkFailed(t *testing.T) {

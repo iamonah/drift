@@ -171,58 +171,72 @@ func (d *ReportDB) GetReportByUserID(ctx context.Context, userID uuid.UUID, id u
 	return report, nil
 }
 
-// func (d *ReportDB) GetReportsByUser(ctx context.Context, userID uuid.UUID) ([]Report, error) {
-// 	stmt := `
-// 		SELECT
-// 		user_id,
-// 		id,
-// 		report_type,
-// 		status,
-// 		output_object_key,
-// 		error_message,
-// 		created_at,
-// 		started_at,
-// 		failed_at,
-// 		completed_at
-// 		FROM reports
-// 		WHERE user_id = $1
-// 		ORDER BY created_at DESC
-// 	`
+// ClaimReport atomically claims a pending report, or one that has been left
+// processing for longer than lease, and returns its updated data.
+//
+// The lease is measured from started_at, which holds the start of the current
+// attempt rather than the moment the lease expires. A report left processing
+// without a started_at cannot be aged, so it is treated as expired.
+//
+// A report still inside another worker's lease returns ErrReportProcessing. A
+// terminal or unknown report returns nil, nil.
+func (d *ReportDB) ClaimReport(ctx context.Context, userID uuid.UUID, reportID uuid.UUID, lease time.Duration) (*Report, error) {
+	if lease <= 0 {
+		return nil, errors.New("claim report: lease must be positive")
+	}
 
-// 	rows, err := d.db.QueryContext(ctx, stmt, userID)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	defer rows.Close()
-
-// 	var userReports []Report
-
-// 	for rows.Next() {
-// 		report, err := scanReport(rows)
-// 		if err != nil {
-// 			return nil, err
-// 		}
-
-// 		userReports = append(userReports, report)
-// 	}
-
-// 	if err := rows.Err(); err != nil {
-// 		return nil, err
-// 	}
-
-// 	return userReports, nil
-// }
-
-func (d *ReportDB) MarkStarted(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
 	stmt := `
 		UPDATE reports SET
-		status = $3,
-		started_at = CURRENT_TIMESTAMP
-		WHERE user_id = $1 AND id = $2
-	`
+			status = $1,
+			started_at = CURRENT_TIMESTAMP,
+			failed_at = NULL,
+			error_message = NULL
+		WHERE user_id = $2 AND id = $3
+		  AND (
+			status = 'pending'
+			OR (
+				status = 'processing'
+				AND (started_at IS NULL OR started_at < CURRENT_TIMESTAMP - ($4::double precision * INTERVAL '1 second'))
+			)
+		  )
+		RETURNING ` + reportColumns
 
-	_, err := d.db.ExecContext(ctx, stmt, userID, id, string(ReportStatusProcessing))
-	return err
+	report, err := scanReport(d.db.QueryRowContext(
+		ctx,
+		stmt,
+		ReportStatusProcessing,
+		userID,
+		reportID,
+		lease.Seconds(),
+	))
+	if err == nil {
+		return &report, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("claim report: %w", err)
+	}
+
+	// The claim matched nothing, so find out why: a report that is still being
+	// processed must keep its message on the queue for a later delivery.
+	var status ReportStatus
+	err = d.db.QueryRowContext(
+		ctx,
+		`SELECT status FROM reports WHERE user_id = $1 AND id = $2`,
+		userID,
+		reportID,
+	).Scan(&status)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("claim report: read status: %w", err)
+	}
+
+	if status == ReportStatusProcessing {
+		return nil, ErrReportProcessing
+	}
+
+	return nil, nil
 }
 
 func (d *ReportDB) MarkFailed(ctx context.Context, userID uuid.UUID, id uuid.UUID, errorMessage string) error {
