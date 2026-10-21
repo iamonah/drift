@@ -198,7 +198,11 @@ func TestReportDB_MarkFailed(t *testing.T) {
 	user := createTestUser(t)
 	report := createTestReport(t, user.ID)
 
-	err := testReportDB.MarkFailed(context.Background(), report.UserID, report.ID, "file processing failed")
+	claimed, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
+
+	err = testReportDB.MarkFailed(context.Background(), report.UserID, report.ID, "file processing failed")
 	require.NoError(t, err)
 
 	retrieved, err := testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
@@ -208,12 +212,31 @@ func TestReportDB_MarkFailed(t *testing.T) {
 	assert.Equal(t, "file processing failed", retrieved.ErrorMessage.String)
 }
 
+// A report can fail before a worker claims it, which is what the API does when
+// it cannot enqueue the job.
+func TestReportDB_MarkFailed_FromPending(t *testing.T) {
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
+
+	err := testReportDB.MarkFailed(context.Background(), report.UserID, report.ID, "failed to enqueue report")
+	require.NoError(t, err)
+
+	retrieved, err := testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
+	require.NoError(t, err)
+	assert.Equal(t, ReportStatusFailed, retrieved.Status)
+	assert.True(t, retrieved.FailedAt.Valid)
+}
+
 func TestReportDB_MarkCompleted(t *testing.T) {
 	user := createTestUser(t)
 	report := createTestReport(t, user.ID)
-	objectKey := "reports/test.pdf"
+	objectKey := "users/test/reports/test.csv.gz"
 
-	err := testReportDB.MarkCompleted(context.Background(), report.UserID, report.ID, objectKey)
+	claimed, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
+
+	err = testReportDB.MarkCompleted(context.Background(), report.UserID, report.ID, objectKey)
 	require.NoError(t, err)
 
 	retrieved, err := testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
@@ -221,6 +244,19 @@ func TestReportDB_MarkCompleted(t *testing.T) {
 	assert.True(t, retrieved.CompletedAt.Valid)
 	assert.Equal(t, ReportStatusCompleted, retrieved.Status)
 	assert.Equal(t, objectKey, retrieved.OutputObjectKey.String)
+}
+
+// Completion is only valid once a worker has claimed the report.
+func TestReportDB_MarkCompleted_RequiresClaim(t *testing.T) {
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
+
+	err := testReportDB.MarkCompleted(context.Background(), report.UserID, report.ID, "users/test/reports/test.csv.gz")
+	assert.Error(t, err)
+
+	retrieved, err := testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
+	require.NoError(t, err)
+	assert.Equal(t, ReportStatusPending, retrieved.Status)
 }
 
 func TestReportDB_Delete(t *testing.T) {

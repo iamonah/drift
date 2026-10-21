@@ -240,27 +240,64 @@ func (d *ReportDB) ClaimReport(ctx context.Context, userID uuid.UUID, reportID u
 }
 
 func (d *ReportDB) MarkFailed(ctx context.Context, userID uuid.UUID, id uuid.UUID, errorMessage string) error {
+	//update to failed status only if the status is pending or processing.
 	stmt := `
 		UPDATE reports SET
-		status = $3,
-		failed_at = CURRENT_TIMESTAMP,
-		error_message = $4
-		WHERE user_id = $1 AND id = $2
+			status = $3,
+			failed_at = CURRENT_TIMESTAMP,
+			error_message = $4
+		WHERE user_id = $1 AND id = $2 AND status IN ($5, $6)
 	`
-	_, err := d.db.ExecContext(ctx, stmt, userID, id, string(ReportStatusFailed), errorMessage)
-	return err
+
+	result, err := d.db.ExecContext(
+		ctx, stmt,
+		userID, id,
+		ReportStatusFailed,
+		errorMessage,
+		ReportStatusPending,
+		ReportStatusProcessing,
+	)
+	if err != nil {
+		return fmt.Errorf("markfailed: %w", err)
+	}
+
+	return requireOneRow(result, "markfailed")
 }
 
 func (d *ReportDB) MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.UUID, outputObjectKey string) error {
 	stmt := `
 		UPDATE reports SET
-		status = $3,
-		completed_at = CURRENT_TIMESTAMP,
-		output_object_key = $4
-		WHERE user_id = $1 AND id = $2
+			status = $3,
+			completed_at = CURRENT_TIMESTAMP,
+			output_object_key = $4,
+			error_message = NULL
+		WHERE user_id = $1 AND id = $2 AND status = 'processing'
 	`
-	_, err := d.db.ExecContext(ctx, stmt, userID, id, string(ReportStatusCompleted), outputObjectKey)
-	return err
+
+	result, err := d.db.ExecContext(
+		ctx, stmt,
+		userID, id,
+		ReportStatusCompleted,
+		outputObjectKey,
+	)
+	if err != nil {
+		return fmt.Errorf("markcompleted: %w", err)
+	}
+
+	return requireOneRow(result, "markcompleted")
+}
+
+func requireOneRow(result sql.Result, operation string) error {
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("%s: get affected rows: %w", operation, err)
+	}
+
+	if rowsAffected != 1 {
+		return fmt.Errorf("%s: report was not updated; it may not exist or its status may have changed", operation)
+	}
+
+	return nil
 }
 
 func (d *ReportDB) Delete(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
