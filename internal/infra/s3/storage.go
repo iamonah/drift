@@ -13,7 +13,8 @@ type ObjectInfo struct {
 }
 
 type ObjectStorage interface {
-	UploadObject(ctx context.Context, bucketName, objectKey string, content []byte) error
+	UploadObject(ctx context.Context, bucketName, objectKey string, content []byte, contentType string) error
+	// ListObjects(ctx context.Context, bucketName, prefix string) ([]string, error)
 	DownloadObject(ctx context.Context, bucketName, objectKey string) ([]byte, error)
 	DownloadObjectTo(ctx context.Context, bucketName, objectKey string, dst io.Writer) error
 	HeadObject(ctx context.Context, bucketName, objectKey string) (ObjectInfo, error)

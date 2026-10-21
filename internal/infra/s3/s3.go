@@ -27,7 +27,7 @@ func NewS3Actions(sdkConfig aws.Config, endpoint string) *S3Actions {
 	}
 }
 
-func (s *S3Actions) UploadObject(ctx context.Context, bucketName, objectKey string, content []byte) error {
+func (s *S3Actions) UploadObject(ctx context.Context, bucketName, objectKey string, content []byte, contentType string) error {
 	if bucketName == "" {
 		return fmt.Errorf("upload object: bucket name is required")
 	}
@@ -36,9 +36,10 @@ func (s *S3Actions) UploadObject(ctx context.Context, bucketName, objectKey stri
 	}
 
 	_, err := s.S3Client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(bucketName),
-		Key:    aws.String(objectKey),
-		Body:   bytes.NewReader(content),
+		Bucket:      aws.String(bucketName),
+		Key:         aws.String(objectKey),
+		Body:        bytes.NewReader(content),
+		ContentType: aws.String(contentType),
 	})
 	if err != nil {
 		return fmt.Errorf("upload object %q to bucket %q: %w", objectKey, bucketName, err)
