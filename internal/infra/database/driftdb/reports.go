@@ -107,35 +107,55 @@ func scanReport(row interface{ Scan(dest ...any) error }) (Report, error) {
 	return report, err
 }
 
-func (d *ReportDB) CreateReport(ctx context.Context, report Report) error {
+const reportColumns = `
+	user_id,
+	id,
+	report_type,
+	status,
+	output_object_key,
+	error_message,
+	created_at,
+	started_at,
+	failed_at,
+	completed_at
+`
+
+// CreateReport inserts a pending report and returns it as stored, so the caller
+// gets the database-generated values (status, created_at).
+func (d *ReportDB) CreateReport(ctx context.Context, report Report) (Report, error) {
+	reportType, err := CheckReportType(report.ReportType)
+	if err != nil {
+		return Report{}, err
+	}
+
 	stmt := `
 		INSERT INTO reports (user_id, id, report_type, status)
 		VALUES ($1, $2, $3, $4)
-	`
-	_, err := d.db.ExecContext(ctx, stmt, report.UserID, report.ID, report.ReportType, string(ReportStatusPending))
+		RETURNING ` + reportColumns
+
+	created, err := scanReport(d.db.QueryRowContext(
+		ctx,
+		stmt,
+		report.UserID,
+		report.ID,
+		reportType.String(),
+		ReportStatusPending,
+	))
 	if err != nil {
 		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && string(pqErr.Code) == "23505" {
-			return fmt.Errorf("createreport: this report %s already exists", report.ID)
+		// 23505 covers every unique violation, so match the primary key
+		// constraint explicitly rather than assuming a duplicate id.
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" && pqErr.Constraint == "reports_pkey" {
+			return Report{}, fmt.Errorf("createreport: report %s already exists: %w", report.ID, err)
 		}
-		return fmt.Errorf("createreport: %w", err)
+		return Report{}, fmt.Errorf("createreport: %w", err)
 	}
-	return nil
+
+	return created, nil
 }
 
 func (d *ReportDB) GetReportByUserID(ctx context.Context, userID uuid.UUID, id uuid.UUID) (Report, error) {
-	stmt := `
-		SELECT 	
-		user_id,
-		id,
-		report_type,
-		status,
-		output_object_key,
-		error_message,
-		created_at,
-		started_at,
-		failed_at,
-		completed_at
+	stmt := `SELECT ` + reportColumns + `
 		FROM reports
 		WHERE user_id = $1 AND id = $2
 	`
@@ -143,9 +163,9 @@ func (d *ReportDB) GetReportByUserID(ctx context.Context, userID uuid.UUID, id u
 	report, err := scanReport(d.db.QueryRowContext(ctx, stmt, userID, id))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return report, ErrReportNotFound
+			return Report{}, ErrReportNotFound
 		}
-		return report, fmt.Errorf("getreport: %w", err)
+		return Report{}, fmt.Errorf("getreport: %w", err)
 	}
 
 	return report, nil
@@ -230,9 +250,12 @@ func (d *ReportDB) MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.
 }
 
 func (d *ReportDB) Delete(ctx context.Context, userID uuid.UUID, id uuid.UUID) error {
-	stmt := `
-		DELETE FROM reports	WHERE user_id = $1 AND id = $2
-	`
+	stmt := `DELETE FROM reports WHERE user_id = $1 AND id = $2`
+
 	_, err := d.db.ExecContext(ctx, stmt, userID, id)
-	return err
+	if err != nil {
+		return fmt.Errorf("delete report: %w", err)
+	}
+
+	return nil
 }

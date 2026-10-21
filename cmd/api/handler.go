@@ -11,7 +11,6 @@ import (
 	"github.com/gorilla/mux"
 	cfg "github.com/iamonah/drift/config"
 	"github.com/iamonah/drift/internal/infra/database/driftdb"
-	"github.com/iamonah/drift/internal/job"
 	"github.com/iamonah/drift/internal/util"
 )
 
@@ -301,11 +300,6 @@ type createReportRequest struct {
 	ReportType string `json:"report_type" validate:"required"`
 }
 
-type createReportResponse struct {
-	ID     uuid.UUID `json:"id"`
-	Status string    `json:"status"`
-}
-
 func (a *App) CreateReport() http.HandlerFunc {
 	return a.handler(func(w http.ResponseWriter, r *http.Request) error {
 		payload, err := GetJWTPayloadCTX(r)
@@ -321,31 +315,43 @@ func (a *App) CreateReport() http.HandlerFunc {
 			return util.NewError(http.StatusBadRequest, err)
 		}
 
-		report := driftdb.Report{
-			UserID:     payload.UserID,
-			ID:         uuid.New(),
-			ReportType: req.ReportType,
-		}
-		if err := a.Store.ReportStore.CreateReport(r.Context(), report); err != nil {
-			return err
-		}
-
-		_, err = a.awsSQS.SendMessage(r.Context(), a.queueURL, job.Report{
-			ID:     report.ID,
-			UserID: report.UserID,
-			Type:   report.ReportType,
-		}, nil)
-		if err != nil {
-			// Keep the row from sitting as pending forever when the enqueue fails.
-			if markErr := a.Store.ReportStore.MarkFailed(r.Context(), report.UserID, report.ID, "failed to enqueue report"); markErr != nil {
-				a.logger(r).Error().Err(markErr).Str("report_id", report.ID.String()).Msg("failed to mark report as failed")
+		// The report and its publication intent are committed together, so a
+		// report can never exist without a job waiting to be published.
+		// The report is created in a transaction to ensure that the outbox entry is
+		// only created if the report is successfully created. If the outbox entry
+		// fails to be created, the report is rolled back and never exists.
+		var report driftdb.Report
+		err = a.Store.WithTX(r.Context(), func(store *driftdb.Store) error {
+			created, err := store.ReportStore.CreateReport(r.Context(), driftdb.Report{
+				UserID:     payload.UserID,
+				ID:         uuid.New(),
+				ReportType: req.ReportType,
+			})
+			if err != nil {
+				return err
 			}
-			return fmt.Errorf("enqueue report %s: %w", report.ID, err)
+
+			report = created
+
+			err = store.OutboxStore.Enqueue(r.Context(), driftdb.OutboxEntry{
+				ID:         uuid.New(),
+				UserID:     created.UserID,
+				ReportID:   created.ID,
+				ReportType: created.ReportType,
+			})
+			return err
+		})
+		if err != nil {
+			if errors.Is(err, driftdb.ErrInvalidReportType) {
+				return util.NewError(http.StatusBadRequest, errors.New("invalid report type"))
+			}
+			return fmt.Errorf("create report: %w", err)
 		}
 
 		a.logger(r).Info().Str("report_id", report.ID.String()).Str("user_id", payload.UserID.String()).Msg("report queued")
 
-		a.writeJSON(r, w, http.StatusAccepted, createReportResponse{ID: report.ID, Status: "queued"})
+		w.Header().Set("Location", "/api/v1/reports/"+report.ID.String())
+		a.writeJSON(r, w, http.StatusAccepted, newReportResponse(report))
 		return nil
 	})
 }

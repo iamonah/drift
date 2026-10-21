@@ -7,7 +7,7 @@ import (
 )
 
 type reportStore interface {
-	CreateReport(ctx context.Context, report Report) error
+	CreateReport(ctx context.Context, report Report) (Report, error)
 	GetReportByUserID(ctx context.Context, userID uuid.UUID, id uuid.UUID) (Report, error)
 	// GetReportsByUser(ctx context.Context, userID uuid.UUID) ([]Report, error)
 	MarkStarted(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
@@ -33,11 +33,18 @@ type refreshStore interface {
 	DeleteExpired(ctx context.Context) error
 }
 
+type outboxStore interface {
+	Enqueue(ctx context.Context, entry OutboxEntry) error
+	Pending(ctx context.Context, limit int) ([]OutboxEntry, error)
+	MarkPublished(ctx context.Context, id uuid.UUID) error
+}
+
 type Store struct {
 	db           *sql.DB
 	ReportStore  reportStore
 	UserStore    userStore
 	SessionStore refreshStore
+	OutboxStore  outboxStore
 }
 
 func NewStore(db *sql.DB) *Store {
@@ -50,6 +57,7 @@ func newStore(db *sql.DB, dbtx DBTX) *Store {
 		ReportStore:  &ReportDB{db: dbtx},
 		UserStore:    &UserDB{db: dbtx},
 		SessionStore: &RefreshTokenDB{db: dbtx},
+		OutboxStore:  &OutboxDB{db: dbtx},
 	}
 }
 

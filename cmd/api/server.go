@@ -84,6 +84,10 @@ func (app *App) Serve() error {
 		shutdownError <- srv.Shutdown(ctx)
 	}()
 
+	publisherCtx, stopPublisher := context.WithCancel(context.Background())
+	defer stopPublisher()
+	go app.runOutboxPublisher(publisherCtx)
+
 	app.log.Info().
 		Str("port", app.cfg.Server.Port).
 		Str("env", app.cfg.Environment).

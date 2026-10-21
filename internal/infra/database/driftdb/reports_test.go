@@ -13,13 +13,11 @@ import (
 func createTestReport(t *testing.T, userID uuid.UUID) Report {
 	t.Helper()
 
-	report := Report{
+	report, err := testReportDB.CreateReport(context.Background(), Report{
 		UserID:     userID,
 		ID:         uuid.New(),
-		ReportType: "test",
-	}
-
-	err := testReportDB.CreateReport(context.Background(), report)
+		ReportType: ReportTypeMonsters.String(),
+	})
 	require.NoError(t, err)
 
 	return report
@@ -28,19 +26,19 @@ func createTestReport(t *testing.T, userID uuid.UUID) Report {
 func TestReportDB_CreateReport(t *testing.T) {
 	user := createTestUser(t)
 
-	report := Report{
+	created, err := testReportDB.CreateReport(context.Background(), Report{
 		UserID:     user.ID,
 		ID:         uuid.New(),
-		ReportType: "sales_summary",
-	}
-
-	err := testReportDB.CreateReport(context.Background(), report)
+		ReportType: ReportTypeFoods.String(),
+	})
 	require.NoError(t, err)
+	assert.Equal(t, ReportStatusPending, created.Status)
+	assert.NotZero(t, created.CreatedAt)
 
-	retrieved, err := testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
+	retrieved, err := testReportDB.GetReportByUserID(context.Background(), created.UserID, created.ID)
 	require.NoError(t, err)
-	assert.Equal(t, report.ID, retrieved.ID)
-	assert.Equal(t, report.ReportType, retrieved.ReportType)
+	assert.Equal(t, created.ID, retrieved.ID)
+	assert.Equal(t, created.ReportType, retrieved.ReportType)
 	assert.Equal(t, ReportStatusPending, retrieved.Status)
 }
 
@@ -48,9 +46,20 @@ func TestReportDB_CreateReport_Duplicate(t *testing.T) {
 	user := createTestUser(t)
 	report := createTestReport(t, user.ID)
 
-	err := testReportDB.CreateReport(context.Background(), report)
+	_, err := testReportDB.CreateReport(context.Background(), report)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "already exists")
+}
+
+func TestReportDB_CreateReport_InvalidType(t *testing.T) {
+	user := createTestUser(t)
+
+	_, err := testReportDB.CreateReport(context.Background(), Report{
+		UserID:     user.ID,
+		ID:         uuid.New(),
+		ReportType: "banana",
+	})
+	assert.ErrorIs(t, err, ErrInvalidReportType)
 }
 
 func TestReportDB_GetReport(t *testing.T) {

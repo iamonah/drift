@@ -35,6 +35,8 @@ var (
 	testUserDB   *UserDB
 	testReportDB *ReportDB
 	testTokenDB  *RefreshTokenDB
+	testOutboxDB *OutboxDB
+	testStore    *Store
 )
 
 func createTestUser(t *testing.T) User {
@@ -87,6 +89,8 @@ func TestMain(m *testing.M) {
 	testUserDB = NewUserDB(testDB)
 	testReportDB = NewReportDB(testDB)
 	testTokenDB = NewRefreshTokenDB(testDB)
+	testOutboxDB = NewOutboxDB(testDB)
+	testStore = NewStore(testDB)
 
 	code := m.Run()
 
@@ -100,6 +104,6 @@ func TestMain(m *testing.M) {
 }
 
 func tearDownTestDB() error {
-	_, err := testDB.Exec("TRUNCATE TABLE users, reports, refresh_tokens RESTART IDENTITY CASCADE")
+	_, err := testDB.Exec("TRUNCATE TABLE users, reports, refresh_tokens, report_outbox RESTART IDENTITY CASCADE")
 	return err
 }
