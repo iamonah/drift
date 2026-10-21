@@ -150,3 +150,14 @@ func TestCheckReportStatus(t *testing.T) {
 	_, err := CheckReportStatus("queued")
 	assert.Error(t, err)
 }
+
+func TestCheckReportType(t *testing.T) {
+	for _, reportType := range []string{"monsters", "foods"} {
+		got, err := CheckReportType(reportType)
+		require.NoError(t, err)
+		assert.Equal(t, ReportType(reportType), got)
+	}
+
+	_, err := CheckReportType("banana")
+	assert.Error(t, err)
+}

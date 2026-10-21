@@ -19,9 +19,43 @@ func NewReportDB(db *sql.DB) *ReportDB {
 	return &ReportDB{db: db}
 }
 
+type ReportType string
+
+var reportTypes = make(map[string]ReportType)
+
+func newReportType(value string) ReportType {
+	t := ReportType(value)
+	reportTypes[value] = t
+	return t
+}
+
+var (
+	ReportTypeMonsters = newReportType("monsters")
+	ReportTypeFoods    = newReportType("foods")
+)
+
+func CheckReportType(reportType string) (ReportType, error) {
+	t, ok := reportTypes[reportType]
+	if !ok {
+		return "", ErrInvalidReportType
+	}
+
+	return t, nil
+}
+
+func (t ReportType) String() string {
+	return string(t)
+}
+
 type ReportStatus string
 
-var reportStatuses = map[string]ReportStatus{}
+var reportStatuses = make(map[string]ReportStatus)
+
+func newReportStatus(value string) ReportStatus {
+	s := ReportStatus(value)
+	reportStatuses[value] = s
+	return s
+}
 
 var (
 	ReportStatusPending    = newReportStatus("pending")
@@ -30,21 +64,18 @@ var (
 	ReportStatusFailed     = newReportStatus("failed")
 )
 
-func newReportStatus(status string) ReportStatus {
-	if _, ok := reportStatuses[status]; !ok {
-		reportStatuses[status] = ReportStatus(status)
-	}
-	return reportStatuses[status]
-}
-
 func CheckReportStatus(status string) (ReportStatus, error) {
-	if s, ok := reportStatuses[status]; ok {
-		return s, nil
+	s, ok := reportStatuses[status]
+	if !ok {
+		return "", ErrInvalidReportStatus
 	}
-	return "", fmt.Errorf("report status %q is not recognised", status)
+
+	return s, nil
 }
 
-func (s ReportStatus) String() string { return string(s) }
+func (s ReportStatus) String() string {
+	return string(s)
+}
 
 type Report struct {
 	UserID          uuid.UUID

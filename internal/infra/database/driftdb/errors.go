@@ -8,4 +8,7 @@ var (
 	ErrRefreshTokenNotFound = errors.New("refresh token not found")
 	ErrRefreshTokenBlocked  = errors.New("refresh token is blocked")
 	ErrReportNotFound       = errors.New("report not found")
+	ErrReportProcessing     = errors.New("report is already processing")
+	ErrInvalidReportStatus  = errors.New("invalid report status")
+	ErrInvalidReportType    = errors.New("invalid report type")
 )
