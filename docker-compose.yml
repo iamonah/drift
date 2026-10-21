@@ -2,7 +2,7 @@ services:
   driftdb:
     image: postgres:18.3
     container_name: driftdb
-    restart: always
+    # restart: always
     environment:
       POSTGRES_USER: driftadmin
       POSTGRES_PASSWORD: secret
@@ -15,7 +15,7 @@ services:
   testdb:
     image: postgres:18.3
     container_name: testdb
-    restart: always
+    # restart: always,
     profiles: ["test"]
     environment:
       POSTGRES_USER: drifttest
