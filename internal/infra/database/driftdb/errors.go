@@ -9,6 +9,7 @@ var (
 	ErrRefreshTokenBlocked  = errors.New("refresh token is blocked")
 	ErrReportNotFound       = errors.New("report not found")
 	ErrReportProcessing     = errors.New("report is already processing")
+	ErrReportOwnershipLost  = errors.New("report is owned by another worker")
 	ErrInvalidReportStatus  = errors.New("invalid report status")
 	ErrInvalidReportType    = errors.New("invalid report type")
 )

@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"uuid"
 
 	awscfg "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/iamonah/drift/config"
@@ -30,6 +31,10 @@ type Worker struct {
 	loz           *loz.Client
 	log           zerolog.Logger
 
+	// process runs one report. It is a field so message handling can be tested
+	// without a database; NewWorker wires it to ProcessReport.
+	process func(ctx context.Context, userID uuid.UUID, reportID uuid.UUID) error
+
 	cancel context.CancelFunc
 	done   chan struct{}
 }
@@ -42,7 +47,7 @@ func NewWorker(
 	loz *loz.Client,
 	log zerolog.Logger,
 ) *Worker {
-	return &Worker{
+	w := &Worker{
 		cfg:           cfg,
 		ObjectStorage: objectStorage,
 		Queue:         queue,
@@ -51,6 +56,9 @@ func NewWorker(
 		log:           log,
 		done:          make(chan struct{}),
 	}
+	w.process = w.ProcessReport
+
+	return w
 }
 
 // Start polls the reports queue until Stop is called.
@@ -100,29 +108,49 @@ func (w *Worker) handleMessage(ctx context.Context, queueURL string, message sqs
 	var payload job.Report
 	if err := json.Unmarshal([]byte(message.Body), &payload); err != nil {
 		w.log.Error().Err(err).Str("message_id", message.ID).Msg("discarding malformed message")
-		w.deleteMessage(ctx, queueURL, message)
+		w.deleteMessage(ctx, queueURL, message, "")
 		return
 	}
 
-	if err := w.ProcessReport(ctx, payload.UserID, payload.ID); err != nil {
-		if errors.Is(err, driftdb.ErrReportProcessing) {
-			w.log.Info().Str("report_id", payload.ID.String()).Msg("report is already processing; leaving message for redelivery")
-			return
-		}
+	reportID := payload.ID.String()
 
-		// The report has already been marked failed, so a redelivery will claim
-		// nothing and delete the message. Leaving it here avoids losing a report
-		// whose failure could not be recorded.
-		w.log.Error().Err(err).Str("report_id", payload.ID.String()).Msg("report processing failed; leaving message for redelivery")
-		return
+	err := w.process(ctx, payload.UserID, payload.ID)
+	switch {
+	case err == nil:
+		// The report was completed, or it was already terminal and there is
+		// nothing left to do.
+		w.deleteMessage(ctx, queueURL, message, reportID)
+	case errors.Is(err, driftdb.ErrReportNotFound):
+		w.log.Warn().Str("report_id", reportID).Msg("report no longer exists; discarding message")
+		w.deleteMessage(ctx, queueURL, message, reportID)
+	case errors.Is(err, driftdb.ErrReportProcessing), errors.Is(err, driftdb.ErrReportOwnershipLost):
+		w.log.Info().Str("report_id", reportID).Msg("report is held by another worker; deferring message")
+		w.deferMessage(ctx, queueURL, message, reportID)
+	default:
+		// The failure is recorded on the report. Keep the message so SQS
+		// redelivers it; the next delivery sees a terminal report and deletes it.
+		w.log.Error().Err(err).Str("report_id", reportID).Msg("report processing failed; leaving message for redelivery")
 	}
-
-	w.deleteMessage(ctx, queueURL, message)
 }
 
-func (w *Worker) deleteMessage(ctx context.Context, queueURL string, message sqs.Message) {
+func (w *Worker) deleteMessage(ctx context.Context, queueURL string, message sqs.Message, reportID string) {
 	if err := w.Queue.DeleteMessage(ctx, queueURL, message.ReceiptHandle); err != nil {
-		w.log.Error().Err(err).Str("message_id", message.ID).Msg("delete message")
+		w.log.Error().Err(err).
+			Str("message_id", message.ID).
+			Str("report_id", reportID).
+			Msg("delete message")
+	}
+}
+
+func (w *Worker) deferMessage(ctx context.Context, queueURL string, message sqs.Message, reportID string) {
+	timeout := int32(reportDeferDuration / time.Second)
+
+	if err := w.Queue.ChangeMessageVisibility(ctx, queueURL, message.ReceiptHandle, timeout); err != nil {
+		w.log.Error().Err(err).
+			Str("message_id", message.ID).
+			Str("report_id", reportID).
+			Dur("defer", reportDeferDuration).
+			Msg("defer message")
 	}
 }
 

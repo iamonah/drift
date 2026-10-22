@@ -88,6 +88,10 @@ type Report struct {
 	StartedAt       sql.NullTime
 	FailedAt        sql.NullTime
 	CompletedAt     sql.NullTime
+
+	// ClaimToken is the token assigned by ClaimReport for the current attempt.
+	// It is zero on reports read through other queries.
+	ClaimToken uuid.UUID
 }
 
 func scanReport(row interface{ Scan(dest ...any) error }) (Report, error) {
@@ -171,53 +175,67 @@ func (d *ReportDB) GetReportByUserID(ctx context.Context, userID uuid.UUID, id u
 	return report, nil
 }
 
-// ClaimReport atomically claims a pending report, or one that has been left
-// processing for longer than lease, and returns its updated data.
+// ClaimReport atomically claims a pending report, or a processing report whose
+// lease has expired, and returns its updated data.
 //
-// The lease is measured from started_at, which holds the start of the current
-// attempt rather than the moment the lease expires. A report left processing
-// without a started_at cannot be aged, so it is treated as expired.
+// Every successful claim assigns a fresh UUID claim token, returned in
+// Report.ClaimToken, which the worker must present for lease renewal and for
+// terminal transitions. A processing report with no lease expiration is treated
+// as expired so that reports left in an inconsistent state can be recovered.
 //
-// A report still inside another worker's lease returns ErrReportProcessing. A
-// terminal or unknown report returns nil, nil.
+// A report still inside another worker's lease returns ErrReportProcessing, and
+// a report that does not exist returns ErrReportNotFound. A terminal report
+// (completed or failed) returns nil, nil.
 func (d *ReportDB) ClaimReport(ctx context.Context, userID uuid.UUID, reportID uuid.UUID, lease time.Duration) (*Report, error) {
 	if lease <= 0 {
 		return nil, errors.New("claim report: lease must be positive")
 	}
 
+	claimToken := uuid.New()
+
 	stmt := `
-		UPDATE reports SET
-			status = $1,
+		UPDATE reports
+		SET
+			status = 'processing',
+			claim_token = $3,
 			started_at = CURRENT_TIMESTAMP,
+			lease_expires_at = CURRENT_TIMESTAMP + ($4 * INTERVAL '1 second'),
+			processing_attempts = processing_attempts + 1,
 			failed_at = NULL,
 			error_message = NULL
-		WHERE user_id = $2 AND id = $3
-		  AND (
+		WHERE user_id = $1
+		AND id = $2
+		AND processing_attempts < processing_limit
+		AND (
 			status = 'pending'
 			OR (
 				status = 'processing'
-				AND (started_at IS NULL OR started_at < CURRENT_TIMESTAMP - ($4::double precision * INTERVAL '1 second'))
+				AND (
+					lease_expires_at IS NULL
+					OR lease_expires_at <= CURRENT_TIMESTAMP
+				)
 			)
-		  )
+		)
 		RETURNING ` + reportColumns
 
 	report, err := scanReport(d.db.QueryRowContext(
 		ctx,
 		stmt,
-		ReportStatusProcessing,
 		userID,
 		reportID,
+		claimToken,
 		lease.Seconds(),
 	))
 	if err == nil {
+		report.ClaimToken = claimToken
 		return &report, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("claim report: %w", err)
 	}
 
-	// The claim matched nothing, so find out why: a report that is still being
-	// processed must keep its message on the queue for a later delivery.
+	// The claim matched nothing, so check whether another worker still owns
+	// a valid lease, whether the report is terminal, or whether it is gone.
 	var status ReportStatus
 	err = d.db.QueryRowContext(
 		ctx,
@@ -227,7 +245,7 @@ func (d *ReportDB) ClaimReport(ctx context.Context, userID uuid.UUID, reportID u
 	).Scan(&status)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+			return nil, ErrReportNotFound
 		}
 		return nil, fmt.Errorf("claim report: read status: %w", err)
 	}
@@ -236,17 +254,42 @@ func (d *ReportDB) ClaimReport(ctx context.Context, userID uuid.UUID, reportID u
 		return nil, ErrReportProcessing
 	}
 
+	// A terminal report is not an error. Returning nil indicates that
+	// there is no work left to do, allowing the caller to acknowledge
+	// the SQS message without processing the report again.
 	return nil, nil
 }
 
-func (d *ReportDB) MarkFailed(ctx context.Context, userID uuid.UUID, id uuid.UUID, errorMessage string) error {
-	//update to failed status only if the status is pending or processing.
+// UpdateLease extends the lease of a report only while claimToken still owns it.
+// A report claimed by another worker returns ErrReportOwnershipLost.
+func (d *ReportDB) UpdateLease(ctx context.Context, userID uuid.UUID, id uuid.UUID, claimToken uuid.UUID, lease time.Duration) error {
+	if lease <= 0 {
+		return errors.New("update lease: lease must be positive")
+	}
+
+	stmt := `
+		UPDATE reports
+		SET lease_expires_at = CURRENT_TIMESTAMP + ($4 * INTERVAL '1 second')
+		WHERE user_id = $1 AND id = $2 AND status = 'processing' AND claim_token = $3
+	`
+
+	result, err := d.db.ExecContext(ctx, stmt, userID, id, claimToken, lease.Seconds())
+	if err != nil {
+		return fmt.Errorf("update lease: %w", err)
+	}
+
+	return requireOwnedRow(result, "update lease")
+}
+
+// MarkFailed records a failure only while claimToken still owns the report.
+// A stale worker cannot overwrite a newer attempt's state.
+func (d *ReportDB) MarkFailed(ctx context.Context, userID uuid.UUID, id uuid.UUID, claimToken uuid.UUID, errorMessage string) error {
 	stmt := `
 		UPDATE reports SET
 			status = $3,
 			failed_at = CURRENT_TIMESTAMP,
 			error_message = $4
-		WHERE user_id = $1 AND id = $2 AND status IN ($5, $6)
+		WHERE user_id = $1 AND id = $2 AND status = 'processing' AND claim_token = $5
 	`
 
 	result, err := d.db.ExecContext(
@@ -254,24 +297,25 @@ func (d *ReportDB) MarkFailed(ctx context.Context, userID uuid.UUID, id uuid.UUI
 		userID, id,
 		ReportStatusFailed,
 		errorMessage,
-		ReportStatusPending,
-		ReportStatusProcessing,
+		claimToken,
 	)
 	if err != nil {
 		return fmt.Errorf("markfailed: %w", err)
 	}
 
-	return requireOneRow(result, "markfailed")
+	return requireOwnedRow(result, "markfailed")
 }
 
-func (d *ReportDB) MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.UUID, outputObjectKey string) error {
+// MarkCompleted completes a report only while claimToken still owns it.
+// A stale worker cannot overwrite a newer attempt's state.
+func (d *ReportDB) MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.UUID, claimToken uuid.UUID, outputObjectKey string) error {
 	stmt := `
 		UPDATE reports SET
 			status = $3,
 			completed_at = CURRENT_TIMESTAMP,
 			output_object_key = $4,
 			error_message = NULL
-		WHERE user_id = $1 AND id = $2 AND status = 'processing'
+		WHERE user_id = $1 AND id = $2 AND status = 'processing' AND claim_token = $5
 	`
 
 	result, err := d.db.ExecContext(
@@ -279,22 +323,25 @@ func (d *ReportDB) MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.
 		userID, id,
 		ReportStatusCompleted,
 		outputObjectKey,
+		claimToken,
 	)
 	if err != nil {
 		return fmt.Errorf("markcompleted: %w", err)
 	}
 
-	return requireOneRow(result, "markcompleted")
+	return requireOwnedRow(result, "markcompleted")
 }
 
-func requireOneRow(result sql.Result, operation string) error {
+// requireOwnedRow treats a conditional update that matched no row as a lost
+// claim, so callers can tell it apart from a database failure.
+func requireOwnedRow(result sql.Result, operation string) error {
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return fmt.Errorf("%s: get affected rows: %w", operation, err)
 	}
 
 	if rowsAffected != 1 {
-		return fmt.Errorf("%s: report was not updated; it may not exist or its status may have changed", operation)
+		return fmt.Errorf("%s: %w", operation, ErrReportOwnershipLost)
 	}
 
 	return nil

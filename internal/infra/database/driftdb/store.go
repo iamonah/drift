@@ -13,9 +13,10 @@ type reportStore interface {
 	// GetReportsByUser(ctx context.Context, userID uuid.UUID) ([]Report, error)
 	// MarkStarted(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
 	ClaimReport(ctx context.Context, userID uuid.UUID, id uuid.UUID, lease time.Duration) (*Report, error)
-	MarkFailed(ctx context.Context, userID uuid.UUID, id uuid.UUID, errorMessage string) error
-	MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.UUID, outputObjectKey string) error
+	MarkFailed(ctx context.Context, userID uuid.UUID, id uuid.UUID, claimToken uuid.UUID, errorMessage string) error
+	MarkCompleted(ctx context.Context, userID uuid.UUID, id uuid.UUID, claimToken uuid.UUID, outputObjectKey string) error
 	Delete(ctx context.Context, userID uuid.UUID, id uuid.UUID) error
+	UpdateLease(ctx context.Context, userID uuid.UUID, id uuid.UUID, claimToken uuid.UUID, lease time.Duration) error
 }
 
 type userStore interface {
