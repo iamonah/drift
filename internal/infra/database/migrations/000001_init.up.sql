@@ -27,10 +27,21 @@ CREATE TABLE reports (
     status VARCHAR NOT NULL DEFAULT 'pending',
     output_object_key VARCHAR,
     error_message TEXT,
+    claim_token UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     started_at TIMESTAMPTZ,
     failed_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
+    -- lease_expires_at prevents a report from been held indefinitely by a worker that crashed
+    lease_expires_at TIMESTAMPTZ,
+    processing_limit INT NOT NULL DEFAULT 5,
+    processing_attempts INT NOT NULL DEFAULT 0,
+
     PRIMARY KEY (user_id, id),
-    CONSTRAINT reports_status_check CHECK (status IN ('pending', 'processing', 'completed', 'failed'))
+    CONSTRAINT reports_status_check CHECK (
+        status IN ('pending', 'processing', 'completed', 'failed')
+    ),
+    CONSTRAINT reports_processing_limit_check CHECK (processing_limit > 0),
+    CONSTRAINT reports_processing_attempts_check CHECK (processing_attempts >= 0)
+    
 );
