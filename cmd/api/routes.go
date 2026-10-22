@@ -12,7 +12,7 @@ func (a *App) mux() http.Handler {
 	logged := midd.Logger(&a.log)
 	authenticated := midd.AuthBearerToken(a.jwtMaker)
 
-	a.Handle(http.MethodGet, "/", a.handler(a.HealthCheckHandler))
+	a.Handle(http.MethodGet, "/health", a.handler(a.HealthCheckHandler))
 	a.Handle(http.MethodPost, "/api/v1/auth/signup", a.SignUp())
 	a.Handle(http.MethodPost, "/api/v1/auth/signin", a.SignIn())
 	a.Handle(http.MethodPost, "/api/v1/auth/refresh", a.RefreshToken())
