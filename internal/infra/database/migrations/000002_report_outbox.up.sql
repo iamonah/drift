@@ -8,9 +8,6 @@ CREATE TABLE report_outbox (
     report_type VARCHAR NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     published_at TIMESTAMPTZ,
-    attempts INT NOT NULL DEFAULT 0,
-    last_attempt_at TIMESTAMPTZ,
-    last_error TEXT,
     CONSTRAINT report_outbox_report_fk
     FOREIGN KEY (user_id, report_id) REFERENCES reports (user_id, id) ON DELETE CASCADE
 );
