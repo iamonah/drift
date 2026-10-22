@@ -42,7 +42,7 @@ func (d *OutboxDB) Enqueue(ctx context.Context, entry OutboxEntry) error {
 
 // Pending returns the oldest unpublished entries, so a publisher can send them
 // in the order they were requested.
-func (d *OutboxDB) Pending(ctx context.Context, limit int) ([]OutboxEntry, error) {
+func (d *OutboxDB) GetPendingReports(ctx context.Context, limit int) ([]OutboxEntry, error) {
 	stmt := `
 		SELECT id, user_id, report_id, report_type
 		FROM report_outbox

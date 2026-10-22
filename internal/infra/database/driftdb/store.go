@@ -37,7 +37,7 @@ type refreshStore interface {
 
 type outboxStore interface {
 	Enqueue(ctx context.Context, entry OutboxEntry) error
-	Pending(ctx context.Context, limit int) ([]OutboxEntry, error)
+	GetPendingReports(ctx context.Context, limit int) ([]OutboxEntry, error)
 	MarkPublished(ctx context.Context, id uuid.UUID) error
 }
 

@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	outboxInterval  = time.Second
+	outboxInterval  = time.Second * 5
 	outboxBatchSize = 20
 )
 
@@ -16,7 +16,7 @@ const (
 // in the API process so publishing no longer depends on the request that
 // created the report.
 func (a *App) runOutboxPublisher(ctx context.Context) {
-	a.publishOutbox(ctx)
+	a.publishOutbox(ctx) // quick first flush on startup
 
 	ticker := time.NewTicker(outboxInterval)
 	defer ticker.Stop()
@@ -35,7 +35,7 @@ func (a *App) runOutboxPublisher(ctx context.Context) {
 // marked stays unpublished and is sent again, which is safe because claiming a
 // report is what decides whether the job runs.
 func (a *App) publishOutbox(ctx context.Context) {
-	entries, err := a.Store.OutboxStore.Pending(ctx, outboxBatchSize)
+	entries, err := a.Store.OutboxStore.GetPendingReports(ctx, outboxBatchSize)
 	if err != nil {
 		a.log.Error().Err(err).Msg("outbox: list pending entries")
 		return

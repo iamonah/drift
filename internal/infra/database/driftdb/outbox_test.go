@@ -15,7 +15,7 @@ import (
 func pendingEntry(t *testing.T, id uuid.UUID) (OutboxEntry, bool) {
 	t.Helper()
 
-	pending, err := testOutboxDB.Pending(context.Background(), 100)
+	pending, err := testOutboxDB.GetPendingReports(context.Background(), 100)
 	require.NoError(t, err)
 
 	for _, entry := range pending {
@@ -68,7 +68,7 @@ func TestOutboxDB_PendingRespectsLimit(t *testing.T) {
 		createTestOutboxEntry(t, user.ID, report.ID, report.ReportType)
 	}
 
-	pending, err := testOutboxDB.Pending(context.Background(), 1)
+	pending, err := testOutboxDB.GetPendingReports(context.Background(), 1)
 	require.NoError(t, err)
 	assert.Len(t, pending, 1)
 }
