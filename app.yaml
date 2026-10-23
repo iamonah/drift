@@ -36,3 +36,4 @@ awssqs:
 awss3:
   bucket_name: my-test-bucket
   base_url: http://localhost:4566
+  presign_expiration: 10m

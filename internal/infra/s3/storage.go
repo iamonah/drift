@@ -2,7 +2,6 @@ package s3
 
 import (
 	"context"
-	"io"
 	"time"
 )
 
@@ -16,9 +15,7 @@ type ObjectInfo struct {
 type ObjectStorage interface {
 	UploadObject(ctx context.Context, bucketName, objectKey string, content []byte, contentType string) error
 	// ListObjects(ctx context.Context, bucketName, prefix string) ([]string, error)
-	DownloadObject(ctx context.Context, bucketName, objectKey string) ([]byte, error)
-	DownloadObjectTo(ctx context.Context, bucketName, objectKey string, dst io.Writer) error
-	PresignGetObject(ctx context.Context, bucketName, objectKey string, expiration time.Duration) (string, error)
 	HeadObject(ctx context.Context, bucketName, objectKey string) (ObjectInfo, error)
 	DeleteObject(ctx context.Context, bucketName, objectKey string) error
+	PresignGetObject(ctx context.Context, bucketName, objectKey string, expiration time.Duration) (string, error)
 }

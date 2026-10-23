@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -44,58 +43,6 @@ func (s *S3Actions) UploadObject(ctx context.Context, bucketName, objectKey stri
 	})
 	if err != nil {
 		return fmt.Errorf("upload object %q to bucket %q: %w", objectKey, bucketName, err)
-	}
-
-	return nil
-}
-
-func (s *S3Actions) DownloadObject(ctx context.Context, bucketName, objectKey string) ([]byte, error) {
-	if bucketName == "" {
-		return nil, fmt.Errorf("download object: bucket name is required")
-	}
-	if objectKey == "" {
-		return nil, fmt.Errorf("download object: object key is required")
-	}
-
-	output, err := s.S3Client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(bucketName),
-		Key:    aws.String(objectKey),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("download object %q from bucket %q: %w", objectKey, bucketName, err)
-	}
-	defer output.Body.Close()
-
-	content, err := io.ReadAll(output.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read object %q from bucket %q: %w", objectKey, bucketName, err)
-	}
-
-	return content, nil
-}
-
-func (s *S3Actions) DownloadObjectTo(ctx context.Context, bucketName, objectKey string, dst io.Writer) error {
-	if bucketName == "" {
-		return fmt.Errorf("download object: bucket name is required")
-	}
-	if objectKey == "" {
-		return fmt.Errorf("download object: object key is required")
-	}
-	if dst == nil {
-		return fmt.Errorf("download object: destination writer is required")
-	}
-
-	output, err := s.S3Client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(bucketName),
-		Key:    aws.String(objectKey),
-	})
-	if err != nil {
-		return fmt.Errorf("download object %q from bucket %q: %w", objectKey, bucketName, err)
-	}
-	defer output.Body.Close()
-
-	if _, err := io.Copy(dst, output.Body); err != nil {
-		return fmt.Errorf("stream object %q from bucket %q: %w", objectKey, bucketName, err)
 	}
 
 	return nil

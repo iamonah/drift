@@ -296,6 +296,10 @@ func (a *App) GetReportByUserID() http.HandlerFunc {
 	})
 }
 
+type reportDownloadResponse struct {
+	URL string `json:"url"`
+}
+
 func (a *App) DownloadReport() http.HandlerFunc {
 	return a.handler(func(w http.ResponseWriter, r *http.Request) error {
 		vars := mux.Vars(r)
@@ -318,17 +322,28 @@ func (a *App) DownloadReport() http.HandlerFunc {
 			return util.NewError(http.StatusInternalServerError, err)
 		}
 
-		if report.Status != driftdb.ReportStatusCompleted || !report.OutputObjectKey.Valid {
+		if report.Status != driftdb.ReportStatusCompleted ||
+			!report.OutputObjectKey.Valid ||
+			report.OutputObjectKey.String == "" {
 			return util.NewError(http.StatusConflict, errors.New("report is not ready"))
 		}
 
-		w.Header().Set("Content-Type", "application/gzip")
-		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", report.ID.String()+".csv.gz"))
+		expiration, err := cfg.ParseDuration(a.cfg.AWSS3.PresignExpiration)
+		if err != nil {
+			return util.NewError(http.StatusInternalServerError, fmt.Errorf("parse report download expiration: %w", err))
+		}
 
-		if err := a.ObjectStorage.DownloadObjectTo(r.Context(), a.cfg.AWSS3.BucketName, report.OutputObjectKey.String, w); err != nil {
+		url, err := a.ObjectStorage.PresignGetObject(
+			r.Context(),
+			a.cfg.AWSS3.BucketName,
+			report.OutputObjectKey.String,
+			expiration,
+		)
+		if err != nil {
 			return util.NewError(http.StatusInternalServerError, err)
 		}
 
+		a.writeJSON(r, w, http.StatusOK, reportDownloadResponse{URL: url})
 		return nil
 	})
 }

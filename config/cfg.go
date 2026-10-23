@@ -50,8 +50,9 @@ type AWSSQS struct {
 }
 
 type AWSS3 struct {
-	BucketName string `koanf:"bucket_name" validate:"required"`
-	BaseURL    string `koanf:"base_url" validate:"required"` //localstack endpoint URL for S3
+	BucketName        string `koanf:"bucket_name" validate:"required"`
+	BaseURL           string `koanf:"base_url" validate:"required"` //localstack endpoint URL for S3
+	PresignExpiration string `koanf:"presign_expiration"` //link expiration time
 }
 
 type JWT struct {
@@ -89,6 +90,10 @@ func LoadConfigFile(path string) (*Config, error) {
 		return nil, fmt.Errorf("loadconfig: decode: %w", err)
 	}
 
+	if config.AWSS3.PresignExpiration == "" {
+		config.AWSS3.PresignExpiration = "10m"
+	}
+
 	validate := validator.New()
 	if err := validate.Struct(config); err != nil {
 		return nil, fmt.Errorf("loadconfig: validate: %w", err)
@@ -108,6 +113,13 @@ func LoadConfigFile(path string) (*Config, error) {
 	}
 	if _, err := ParseDuration(config.Server.IdleTimeout); err != nil {
 		return nil, fmt.Errorf("loadconfig: invalid idle timeout: %w", err)
+	}
+	presignExpiration, err := ParseDuration(config.AWSS3.PresignExpiration)
+	if err != nil {
+		return nil, fmt.Errorf("loadconfig: invalid S3 presign expiration: %w", err)
+	}
+	if presignExpiration <= 0 {
+		return nil, fmt.Errorf("loadconfig: S3 presign expiration must be positive")
 	}
 
 	return &config, nil

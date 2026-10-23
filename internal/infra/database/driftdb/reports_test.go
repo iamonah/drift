@@ -96,6 +96,17 @@ func TestReportDB_GetReport_NotFound(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestReportDB_GetReport_OtherUser(t *testing.T) {
+	owner := createTestUser(t)
+	other := createTestUser(t)
+	report := createTestReport(t, owner.ID)
+
+	retrieved, err := testReportDB.GetReportByUserID(context.Background(), other.ID, report.ID)
+
+	assert.ErrorIs(t, err, ErrReportNotFound)
+	assert.Zero(t, retrieved.ID)
+}
+
 // func TestReportDB_GetReportsByUser(t *testing.T) {
 // 	user := createTestUser(t)
 // 	report1 := createTestReport(t, user.ID)

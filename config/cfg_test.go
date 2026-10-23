@@ -35,6 +35,7 @@ awssqs:
 awss3:
   bucket_name: my-test-bucket
   base_url: http://localhost:4566
+  presign_expiration: 5m
 jwt:
   secret_key: test-jwt-secret
   issuer: drift
@@ -55,6 +56,9 @@ jwt:
 	}
 	if cfg.Server.ReadTimeout != "10s" || cfg.DB.MaxConns != 25 {
 		t.Fatalf("LoadConfigFile() = %#v, want decoded durations and connection limits", cfg)
+	}
+	if cfg.AWSS3.PresignExpiration != "5m" {
+		t.Fatalf("LoadConfigFile() presign expiration = %q, want 5m", cfg.AWSS3.PresignExpiration)
 	}
 }
 
