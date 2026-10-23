@@ -50,7 +50,7 @@ func (a *App) SignUp() http.HandlerFunc {
 
 		hashedPassword, err := util.HashPassword(req.Password)
 		if err != nil {
-			return err
+			return util.NewError(http.StatusInternalServerError, err)
 		}
 
 		data := driftdb.User{
@@ -64,7 +64,7 @@ func (a *App) SignUp() http.HandlerFunc {
 				return util.NewError(http.StatusConflict, errors.New("user already exists"))
 			}
 
-			return err
+			return util.NewError(http.StatusInternalServerError, err)
 		}
 
 		a.logger(r).Info().Str("user_id", user.ID.String()).Msg("user created")
@@ -94,7 +94,7 @@ func (a *App) SignIn() http.HandlerFunc {
 				return util.NewError(http.StatusUnauthorized, errors.New("invalid email or password"))
 			}
 
-			return err
+			return util.NewError(http.StatusInternalServerError, err)
 		}
 		if !util.CheckPasswordHash(req.Password, string(user.HashedPassword)) {
 			return util.NewError(http.StatusUnauthorized, errors.New("invalid email or password"))
@@ -102,7 +102,7 @@ func (a *App) SignIn() http.HandlerFunc {
 
 		response, err := a.createSession(r, user.ID, a.Store)
 		if err != nil {
-			return err
+			return util.NewError(http.StatusInternalServerError, err)
 		}
 
 		a.logger(r).Info().Str("user_id", user.ID.String()).Msg("user signed in")
@@ -204,7 +204,7 @@ func (a *App) RefreshToken() http.HandlerFunc {
 			if errors.Is(err, driftdb.ErrRefreshTokenNotFound) || errors.Is(err, driftdb.ErrRefreshTokenBlocked) {
 				return util.NewError(http.StatusUnauthorized, errors.New("invalid refresh token"))
 			}
-			return err
+			return util.NewError(http.StatusInternalServerError, err)
 		}
 
 		if time.Now().After(storedToken.ExpiresAt) {
@@ -221,7 +221,7 @@ func (a *App) RefreshToken() http.HandlerFunc {
 			return err
 		})
 		if err != nil {
-			return err
+			return util.NewError(http.StatusInternalServerError, err)
 		}
 
 		a.logger(r).Info().Str("user_id", payload.UserID.String()).Msg("refresh token used")
@@ -288,7 +288,7 @@ func (a *App) GetReportByUserID() http.HandlerFunc {
 			if errors.Is(err, driftdb.ErrReportNotFound) {
 				return util.NewError(http.StatusNotFound, errors.New("report not found"))
 			}
-			return err
+			return util.NewError(http.StatusInternalServerError, err)
 		}
 
 		a.writeJSON(r, w, http.StatusOK, newReportResponse(report))
@@ -315,7 +315,7 @@ func (a *App) DownloadReport() http.HandlerFunc {
 			if errors.Is(err, driftdb.ErrReportNotFound) {
 				return util.NewError(http.StatusNotFound, errors.New("report not found"))
 			}
-			return err
+			return util.NewError(http.StatusInternalServerError, err)
 		}
 
 		if report.Status != driftdb.ReportStatusCompleted || !report.OutputObjectKey.Valid {
@@ -326,7 +326,7 @@ func (a *App) DownloadReport() http.HandlerFunc {
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", report.ID.String()+".csv.gz"))
 
 		if err := a.ObjectStorage.DownloadObjectTo(r.Context(), a.cfg.AWSS3.BucketName, report.OutputObjectKey.String, w); err != nil {
-			return fmt.Errorf("download report: %w", err)
+			return util.NewError(http.StatusInternalServerError, err)
 		}
 
 		return nil
@@ -382,7 +382,7 @@ func (a *App) CreateReport() http.HandlerFunc {
 			if errors.Is(err, driftdb.ErrInvalidReportType) {
 				return util.NewError(http.StatusBadRequest, errors.New("invalid report type"))
 			}
-			return fmt.Errorf("create report: %w", err)
+			return util.NewError(http.StatusInternalServerError, err)
 		}
 
 		a.logger(r).Info().Str("report_id", report.ID.String()).Str("user_id", payload.UserID.String()).Msg("report queued")
