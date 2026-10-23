@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -98,6 +99,34 @@ func (s *S3Actions) DownloadObjectTo(ctx context.Context, bucketName, objectKey 
 	}
 
 	return nil
+}
+
+// PresignGetObject returns a short-lived GET URL for an object. The presign
+// client is built from the same S3 client, so the configured endpoint,
+// path-style addressing, and credentials are used for the signature.
+func (s *S3Actions) PresignGetObject(ctx context.Context, bucketName, objectKey string, expiration time.Duration) (string, error) {
+	if bucketName == "" {
+		return "", fmt.Errorf("presign get object: bucket name is required")
+	}
+	if objectKey == "" {
+		return "", fmt.Errorf("presign get object: object key is required")
+	}
+	if expiration <= 0 {
+		return "", fmt.Errorf("presign get object: expiration must be positive")
+	}
+
+	presignClient := s3.NewPresignClient(s.S3Client)
+	request, err := presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(bucketName),
+		Key:    aws.String(objectKey),
+	}, func(options *s3.PresignOptions) {
+		options.Expires = expiration
+	})
+	if err != nil {
+		return "", fmt.Errorf("presign get object %q from bucket %q: %w", objectKey, bucketName, err)
+	}
+
+	return request.URL, nil
 }
 
 func (s *S3Actions) HeadObject(ctx context.Context, bucketName, objectKey string) (ObjectInfo, error) {

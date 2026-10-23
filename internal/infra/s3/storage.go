@@ -3,6 +3,7 @@ package s3
 import (
 	"context"
 	"io"
+	"time"
 )
 
 // ObjectInfo describes a stored object without exposing the AWS SDK type.
@@ -17,6 +18,7 @@ type ObjectStorage interface {
 	// ListObjects(ctx context.Context, bucketName, prefix string) ([]string, error)
 	DownloadObject(ctx context.Context, bucketName, objectKey string) ([]byte, error)
 	DownloadObjectTo(ctx context.Context, bucketName, objectKey string, dst io.Writer) error
+	PresignGetObject(ctx context.Context, bucketName, objectKey string, expiration time.Duration) (string, error)
 	HeadObject(ctx context.Context, bucketName, objectKey string) (ObjectInfo, error)
 	DeleteObject(ctx context.Context, bucketName, objectKey string) error
 }
