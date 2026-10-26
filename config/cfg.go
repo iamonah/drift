@@ -52,7 +52,7 @@ type AWSSQS struct {
 type AWSS3 struct {
 	BucketName        string `koanf:"bucket_name" validate:"required"`
 	BaseURL           string `koanf:"base_url" validate:"required"` //localstack endpoint URL for S3
-	PresignExpiration string `koanf:"presign_expiration"` //link expiration time
+	PresignExpiration string `koanf:"presign_expiration"`           //link expiration time
 }
 
 type JWT struct {
@@ -91,7 +91,7 @@ func LoadConfigFile(path string) (*Config, error) {
 	}
 
 	if config.AWSS3.PresignExpiration == "" {
-		config.AWSS3.PresignExpiration = "10m"
+		config.AWSS3.PresignExpiration = "2m"
 	}
 
 	validate := validator.New()
