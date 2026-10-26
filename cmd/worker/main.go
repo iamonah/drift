@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
+
 	"uuid"
 
 	awscfg "github.com/aws/aws-sdk-go-v2/config"
@@ -27,76 +29,95 @@ type Worker struct {
 	cfg           *config.Config
 	ObjectStorage s3.ObjectStorage
 	Queue         sqs.Queue
-	reportStore   *driftdb.Store //we requre report store
+	reportStore   *driftdb.Store
 	loz           *loz.Client
 	log           zerolog.Logger
-
-	// process runs one report. It is a field so message handling can be tested
-	// without a database; NewWorker wires it to ProcessReport.
-	process func(ctx context.Context, userID uuid.UUID, reportID uuid.UUID) error
-
-	cancel context.CancelFunc
+	process       func(ctx context.Context, userID uuid.UUID, reportID uuid.UUID) error
+	concurrency   int
 }
 
-func NewWorker(
-	cfg *config.Config,
-	objectStorage s3.ObjectStorage,
-	queue sqs.Queue,
-	reportStore *driftdb.Store,
-	loz *loz.Client,
-	log zerolog.Logger,
-) *Worker {
+func NewWorker(cfg *config.Config, objectStorage s3.ObjectStorage, queue sqs.Queue, reportStore *driftdb.Store, lozClient *loz.Client, log zerolog.Logger) *Worker {
+	concurrency := 1
+	if cfg != nil && cfg.Worker.Concurrency > 0 {
+		concurrency = cfg.Worker.Concurrency
+	}
+
 	w := &Worker{
 		cfg:           cfg,
 		ObjectStorage: objectStorage,
 		Queue:         queue,
 		reportStore:   reportStore,
-		loz:           loz,
+		loz:           lozClient,
 		log:           log,
+		concurrency:   concurrency,
 	}
 	w.process = w.ProcessReport
 
 	return w
 }
 
-// Start polls the reports queue until Stop is called.
-func (w *Worker) Start() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	w.cancel = cancel
-
+// Start polls SQS and dispatches messages to a fixed pool of workers.
+// It returns only after all worker goroutines have exited.
+func (w *Worker) Start(ctx context.Context) error {
 	queueURL, err := w.Queue.GetQueueURL(ctx, w.cfg.AWSSQS.QueueName)
 	if err != nil {
-		return fmt.Errorf("get queue url: %w", err)
+		if ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("get queue URL: %w", err)
 	}
 
-	w.log.Info().Str("queue_url", queueURL).Msg("worker started")
+	concurrency := max(1, w.concurrency)
+	batchSize := min(int32(concurrency), int32(10))
+	jobs := make(chan sqs.Message, concurrency)
+
+	var workers sync.WaitGroup
+	for range concurrency {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for message := range jobs {
+				w.handleMessage(ctx, queueURL, message)
+			}
+		}()
+	}
+
+	w.log.Info().
+		Str("queue_url", queueURL).
+		Int("concurrency", concurrency).
+		Msg("worker started")
+
+	defer func() {
+		close(jobs)
+		workers.Wait()
+		w.log.Info().Msg("worker stopped")
+	}()
 
 	for {
-		messages, err := w.Queue.ReceiveMessages(ctx, queueURL, 1, 10)
+		messages, err := w.Queue.ReceiveMessages(ctx, queueURL, batchSize, 10)
 		if err != nil {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil { //error is due to context cancellation, exit gracefully
 				return nil
 			}
 
 			w.log.Error().Err(err).Msg("receive messages")
-			time.Sleep(time.Second)
-			continue
+
+			select {
+			case <-time.After(time.Second): //could become exponential backoff if needed
+			case <-ctx.Done():
+				return nil
+			}
+			continue //keep polling for messages even after an error
 		}
 
 		for _, message := range messages {
-			w.handleMessage(ctx, queueURL, message)
+			select {
+			case jobs <- message:
+			case <-ctx.Done():
+				return nil
+			}
 		}
 	}
-}
-
-// Stop cancels the receive loop and waits for the in-flight report to finish.
-func (w *Worker) Stop() error {
-	if w.cancel == nil {
-		return nil
-	}
-
-	w.cancel()
-	return nil
 }
 
 func (w *Worker) handleMessage(ctx context.Context, queueURL string, message sqs.Message) {
@@ -112,8 +133,7 @@ func (w *Worker) handleMessage(ctx context.Context, queueURL string, message sqs
 	err := w.process(ctx, payload.UserID, payload.ID)
 	switch {
 	case err == nil:
-		// The report was completed, or it was already terminal and there is
-		// nothing left to do.
+		// The report completed or is already in a terminal state.
 		w.deleteMessage(ctx, queueURL, message, reportID)
 	case errors.Is(err, driftdb.ErrReportNotFound):
 		w.log.Warn().Str("report_id", reportID).Msg("report no longer exists; discarding message")
@@ -122,8 +142,7 @@ func (w *Worker) handleMessage(ctx context.Context, queueURL string, message sqs
 		w.log.Info().Str("report_id", reportID).Msg("report is held by another worker; deferring message")
 		w.deferMessage(ctx, queueURL, message, reportID)
 	default:
-		// The failure is recorded on the report. Keep the message so SQS
-		// redelivers it; the next delivery sees a terminal report and deletes it.
+		// Leave the message for SQS redelivery.
 		w.log.Error().Err(err).Str("report_id", reportID).Msg("report processing failed; leaving message for redelivery")
 	}
 }
@@ -150,46 +169,40 @@ func (w *Worker) deferMessage(ctx context.Context, queueURL string, message sqs.
 }
 
 func main() {
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	log := zerolog.New(os.Stderr).With().Timestamp().Logger()
 
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to load config")
+		log.Fatal().Err(err).Msg("failed to load config")
 	}
 
-	database, err := database.NewDB(&cfg.DB)
+	db, err := database.NewDB(&cfg.DB)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to create database")
+		log.Fatal().Err(err).Msg("failed to create database")
 	}
+	defer db.Client.Close()
+
 	log.Info().Msg("database connection established successfully")
-	store := driftdb.NewStore(database.Client)
+	store := driftdb.NewStore(db.Client)
 
 	sdkConfig, err := awscfg.LoadDefaultConfig(ctx)
 	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to load AWS config")
+		log.Fatal().Err(err).Msg("failed to load AWS config")
 	}
+
 	log.Info().Msg("AWS config loaded successfully")
 
 	s3Actions := s3.NewS3Actions(sdkConfig, cfg.AWSS3.BaseURL)
 	queue := sqs.NewSQSActions(sdkConfig, cfg.AWSSQS.BaseURL)
-	loz := loz.NewClient(loz.BaseUrl, &http.Client{Timeout: 30 * time.Second})
+	lozClient := loz.NewClient(loz.BaseUrl, &http.Client{Timeout: 30 * time.Second})
 
-	worker := NewWorker(cfg, s3Actions, queue, store, loz, log)
+	worker := NewWorker(cfg, s3Actions, queue, store, lozClient, log)
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-quit
-		log.Info().Msg("stopping worker")
-		if err := worker.Stop(); err != nil {
-			log.Error().Err(err).Msg("stop worker")
-		}
-	}()
-
-	if err := worker.Start(); err != nil {
+	if err := worker.Start(ctx); err != nil {
 		log.Fatal().Err(err).Msg("worker stopped with error")
 	}
-	log.Info().Msg("worker stopped")
 }

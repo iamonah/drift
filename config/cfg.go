@@ -13,6 +13,8 @@ import (
 	"github.com/knadh/koanf/v2"
 )
 
+const defaultWorkerConcurrency = 4
+
 type Database struct {
 	Host            string `koanf:"host" validate:"required"`
 	Port            string `koanf:"port" validate:"required"`
@@ -35,6 +37,10 @@ type Server struct {
 	CORSAllowedOrigins []string `koanf:"cors_allowed_origins" validate:"required"`
 }
 
+type Worker struct {
+	Concurrency int `koanf:"concurrency" validate:"min=1"`
+}
+
 type Config struct {
 	Environment string   `koanf:"environment" validate:"required"`
 	Server      Server   `koanf:"server" validate:"required"`
@@ -42,6 +48,7 @@ type Config struct {
 	AWSSQS      AWSSQS   `koanf:"awssqs" validate:"required"`
 	AWSS3       AWSS3    `koanf:"awss3" validate:"required"`
 	JWT         JWT      `koanf:"jwt" validate:"required"`
+	Worker      Worker   `koanf:"worker"`
 }
 
 type AWSSQS struct {
@@ -92,6 +99,9 @@ func LoadConfigFile(path string) (*Config, error) {
 
 	if config.AWSS3.PresignExpiration == "" {
 		config.AWSS3.PresignExpiration = "2m"
+	}
+	if config.Worker.Concurrency == 0 {
+		config.Worker.Concurrency = defaultWorkerConcurrency
 	}
 
 	validate := validator.New()

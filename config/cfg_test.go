@@ -29,6 +29,8 @@ server:
   host: 127.0.0.1
   cors_allowed_origins:
     - http://localhost:3000
+worker:
+  concurrency: 6
 awssqs:
   queue_name: my-test-queue
   base_url: http://localhost:4566
@@ -59,6 +61,9 @@ jwt:
 	}
 	if cfg.AWSS3.PresignExpiration != "5m" {
 		t.Fatalf("LoadConfigFile() presign expiration = %q, want 5m", cfg.AWSS3.PresignExpiration)
+	}
+	if cfg.Worker.Concurrency != 6 {
+		t.Fatalf("LoadConfigFile() worker concurrency = %d, want 6", cfg.Worker.Concurrency)
 	}
 }
 
