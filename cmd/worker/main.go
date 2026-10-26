@@ -36,7 +36,6 @@ type Worker struct {
 	process func(ctx context.Context, userID uuid.UUID, reportID uuid.UUID) error
 
 	cancel context.CancelFunc
-	done   chan struct{}
 }
 
 func NewWorker(
@@ -54,7 +53,6 @@ func NewWorker(
 		reportStore:   reportStore,
 		loz:           loz,
 		log:           log,
-		done:          make(chan struct{}),
 	}
 	w.process = w.ProcessReport
 
@@ -65,7 +63,6 @@ func NewWorker(
 func (w *Worker) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	w.cancel = cancel
-	defer close(w.done)
 
 	queueURL, err := w.Queue.GetQueueURL(ctx, w.cfg.AWSSQS.QueueName)
 	if err != nil {
@@ -99,8 +96,6 @@ func (w *Worker) Stop() error {
 	}
 
 	w.cancel()
-	<-w.done
-
 	return nil
 }
 
