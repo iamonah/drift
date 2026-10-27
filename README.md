@@ -4,14 +4,7 @@ An asynchronous API built with Go to explore Amazon SQS and background job proce
 
 ## Architecture
 
-```text
-Client → API → SQS → Worker
-          │      │      │
-          ▼      │      ├──→ S3
-       Postgres  │      └──→ LoZ API
-                 │
-                 └── reports_queue
-````
+![Drift infrastructure](assets/infra.png)
 
 ## What I'm Exploring
 
@@ -30,7 +23,6 @@ Client → API → SQS → Worker
 * Amazon SQS
 * PostgreSQL
 * Amazon S3
-* LoZ API
 
 > Built primarily as a hands-on project for understanding Amazon SQS and asynchronous job processing.
 
