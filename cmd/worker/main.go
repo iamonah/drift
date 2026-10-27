@@ -36,6 +36,15 @@ type Worker struct {
 	concurrency   int
 }
 
+// reportDeferDuration is how long a message is deferred when another worker
+// still holds a valid lease on the report. It should stay below the lease so
+// the message returns before the lease expires.
+const reportDeferDuration = 60 * time.Second
+
+// workerShutdownGrace is how long the worker allows in-flight reports to finish
+// after polling stops before canceling them.
+const workerShutdownGrace = 20 * time.Second
+
 func NewWorker(cfg *config.Config, objectStorage s3.ObjectStorage, queue sqs.Queue, reportStore *driftdb.Store, lozClient *loz.Client, log zerolog.Logger) *Worker {
 	concurrency := 1
 	if cfg != nil && cfg.Worker.Concurrency > 0 {
@@ -69,7 +78,10 @@ func (w *Worker) Start(ctx context.Context) error {
 
 	concurrency := max(1, w.concurrency)
 	batchSize := min(int32(concurrency), int32(10))
-	jobs := make(chan sqs.Message, concurrency)
+	jobs := make(chan sqs.Message)
+
+	jobCtx, cancelJobs := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelJobs()
 
 	var workers sync.WaitGroup
 	for range concurrency {
@@ -77,7 +89,7 @@ func (w *Worker) Start(ctx context.Context) error {
 		go func() {
 			defer workers.Done()
 			for message := range jobs {
-				w.handleMessage(ctx, queueURL, message)
+				w.handleMessage(jobCtx, queueURL, message)
 			}
 		}()
 	}
@@ -87,17 +99,12 @@ func (w *Worker) Start(ctx context.Context) error {
 		Int("concurrency", concurrency).
 		Msg("worker started")
 
-	defer func() {
-		close(jobs)
-		workers.Wait()
-		w.log.Info().Msg("worker stopped")
-	}()
-
+poll:
 	for {
 		messages, err := w.Queue.ReceiveMessages(ctx, queueURL, batchSize, 10)
 		if err != nil {
 			if ctx.Err() != nil { //error is due to context cancellation, exit gracefully
-				return nil
+				break poll
 			}
 
 			w.log.Error().Err(err).Msg("receive messages")
@@ -105,19 +112,50 @@ func (w *Worker) Start(ctx context.Context) error {
 			select {
 			case <-time.After(time.Second): //could become exponential backoff if needed
 			case <-ctx.Done():
-				return nil
+				break poll
 			}
 			continue //keep polling for messages even after an error
 		}
 
 		for _, message := range messages {
 			select {
+			case <-ctx.Done():
+				break poll
+			default:
+			}
+
+			select {
 			case jobs <- message:
 			case <-ctx.Done():
-				return nil
+				break poll
 			}
 		}
 	}
+
+	w.log.Info().Msg("worker shutting down")
+	close(jobs)
+
+	workersDone := make(chan struct{})
+	go func() {
+		workers.Wait()
+		close(workersDone)
+	}()
+
+	shutdownTimer := time.NewTimer(workerShutdownGrace)
+	defer shutdownTimer.Stop()
+
+	select {
+	case <-workersDone:
+	case <-shutdownTimer.C:
+		w.log.Warn().
+			Dur("grace", workerShutdownGrace).
+			Msg("worker shutdown grace period expired; canceling in-flight jobs")
+		cancelJobs()
+		<-workersDone
+	}
+
+	w.log.Info().Msg("worker stopped")
+	return nil
 }
 
 func (w *Worker) handleMessage(ctx context.Context, queueURL string, message sqs.Message) {

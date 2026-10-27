@@ -21,11 +21,6 @@ import (
 // report, because the lease is not renewed while a worker is busy.
 const reportClaimLease = 3 * time.Minute
 
-// reportDeferDuration is how long a message is deferred when another worker
-// still holds a valid lease on the report. It should stay below the lease so
-// the message returns before the lease expires.
-const reportDeferDuration = 60 * time.Second
-
 func (w *Worker) ProcessReport(ctx context.Context, userID uuid.UUID, reportID uuid.UUID) (err error) {
 	report, err := w.reportStore.ReportStore.ClaimReport(ctx, userID, reportID, reportClaimLease)
 	if err != nil {
