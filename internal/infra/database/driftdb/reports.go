@@ -175,6 +175,10 @@ func (d *ReportDB) GetReportByUserID(ctx context.Context, userID uuid.UUID, id u
 	return report, nil
 }
 
+// reportAttemptsExhaustedMessage is stored on a report that can no longer be
+// claimed because it has used its processing attempt budget.
+const reportAttemptsExhaustedMessage = "report processing attempts exhausted"
+
 // ClaimReport atomically claims a pending report, or a processing report whose
 // lease has expired, and returns its updated data.
 //
@@ -183,9 +187,11 @@ func (d *ReportDB) GetReportByUserID(ctx context.Context, userID uuid.UUID, id u
 // terminal transitions. A processing report with no lease expiration is treated
 // as expired so that reports left in an inconsistent state can be recovered.
 //
-// A report still inside another worker's lease returns ErrReportProcessing, and
-// a report that does not exist returns ErrReportNotFound. A terminal report
-// (completed or failed) returns nil, nil.
+// A report whose attempt budget is exhausted cannot be claimed again. When it is
+// pending, or processing with no live lease, it is atomically marked failed and
+// nil, nil is returned. A report still inside another worker's lease returns
+// ErrReportProcessing, and a report that does not exist returns
+// ErrReportNotFound. A terminal report (completed or failed) returns nil, nil.
 func (d *ReportDB) ClaimReport(ctx context.Context, userID uuid.UUID, reportID uuid.UUID, lease time.Duration) (*Report, error) {
 	if lease <= 0 {
 		return nil, errors.New("claim report: lease must be positive")
@@ -234,8 +240,52 @@ func (d *ReportDB) ClaimReport(ctx context.Context, userID uuid.UUID, reportID u
 		return nil, fmt.Errorf("claim report: %w", err)
 	}
 
-	// The claim matched nothing, so check whether another worker still owns
-	// a valid lease, whether the report is terminal, or whether it is gone.
+	// The claim matched nothing. If the attempt budget is exhausted, no worker
+	// can ever claim the report again, so terminalize it before returning no
+	// work. The status and lease guards make this safe under concurrent workers:
+	// only one row update can win, a live lease is left to its owner, and a
+	// stale worker's token-fenced writes fail once the report is failed.
+	result, err := d.db.ExecContext(
+		ctx,
+		`UPDATE reports
+		SET
+			status = 'failed',
+			failed_at = CURRENT_TIMESTAMP,
+			error_message = $3,
+			claim_token = NULL,
+			lease_expires_at = NULL
+		WHERE user_id = $1
+		AND id = $2
+		AND processing_attempts >= processing_limit
+		AND (
+			status = 'pending'
+			OR (
+				status = 'processing'
+				AND (
+					lease_expires_at IS NULL
+					OR lease_expires_at <= CURRENT_TIMESTAMP
+				)
+			)
+		)`,
+		userID,
+		reportID,
+		reportAttemptsExhaustedMessage,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("claim report: fail exhausted report: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("claim report: fail exhausted report: get affected rows: %w", err)
+	}
+	if rowsAffected == 1 {
+		return nil, nil
+	}
+
+	// Nothing was claimed or terminalized, so check whether another worker
+	// still owns a valid lease, whether the report is terminal, or whether it is
+	// gone.
 	var status ReportStatus
 	err = d.db.QueryRowContext(
 		ctx,
@@ -250,14 +300,20 @@ func (d *ReportDB) ClaimReport(ctx context.Context, userID uuid.UUID, reportID u
 		return nil, fmt.Errorf("claim report: read status: %w", err)
 	}
 
-	if status == ReportStatusProcessing {
+	switch status {
+	case ReportStatusCompleted, ReportStatusFailed:
+		// A terminal report is not an error. Returning nil indicates that
+		// there is no work left to do, allowing the caller to acknowledge
+		// the SQS message without processing the report again.
+		return nil, nil
+	case ReportStatusProcessing:
 		return nil, ErrReportProcessing
+	default:
+		// A pending report that survived both updates is not in a state this
+		// method can safely acknowledge. Return an error so its message is
+		// redelivered rather than discarded while the report is non-terminal.
+		return nil, fmt.Errorf("claim report: report %s is pending but not claimable", reportID)
 	}
-
-	// A terminal report is not an error. Returning nil indicates that
-	// there is no work left to do, allowing the caller to acknowledge
-	// the SQS message without processing the report again.
-	return nil, nil
 }
 
 // UpdateLease extends the lease of a report only while claimToken still owns it.

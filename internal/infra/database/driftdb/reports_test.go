@@ -28,6 +28,18 @@ func expireLease(t *testing.T, userID uuid.UUID, reportID uuid.UUID) {
 	require.NoError(t, err)
 }
 
+// setProcessingBudget overrides the attempt counters directly so tests can
+// reach the exhaustion boundary without claiming a report repeatedly.
+func setProcessingBudget(t *testing.T, userID uuid.UUID, reportID uuid.UUID, attempts, limit int) {
+	t.Helper()
+
+	_, err := testDB.Exec(
+		`UPDATE reports SET processing_attempts = $3, processing_limit = $4 WHERE user_id = $1 AND id = $2`,
+		userID, reportID, attempts, limit,
+	)
+	require.NoError(t, err)
+}
+
 func createTestReport(t *testing.T, userID uuid.UUID) Report {
 	t.Helper()
 
@@ -252,6 +264,197 @@ func TestReportDB_ClaimReport_ProcessingWithoutLease(t *testing.T) {
 	require.NotNil(t, reclaimed, "a processing report without a lease must be claimable")
 	assert.True(t, reclaimed.StartedAt.Valid)
 	assert.NotEqual(t, first.ClaimToken, reclaimed.ClaimToken)
+}
+
+func TestReportDB_ClaimReport_PendingAttemptsExhausted(t *testing.T) {
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
+
+	setProcessingBudget(t, report.UserID, report.ID, 5, 5)
+
+	claimed, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	assert.Nil(t, claimed, "an exhausted pending report has no work left")
+
+	retrieved, err := testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
+	require.NoError(t, err)
+	assert.Equal(t, ReportStatusFailed, retrieved.Status, "an exhausted pending report must be terminalized")
+	assert.True(t, retrieved.FailedAt.Valid)
+	assert.Equal(t, reportAttemptsExhaustedMessage, retrieved.ErrorMessage.String)
+
+	// A second claim must keep the report terminal rather than incrementing
+	// attempts or returning it to processing.
+	again, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	assert.Nil(t, again)
+
+	var attempts int
+	err = testDB.QueryRow(
+		`SELECT processing_attempts FROM reports WHERE user_id = $1 AND id = $2`,
+		report.UserID, report.ID,
+	).Scan(&attempts)
+	require.NoError(t, err)
+	assert.Equal(t, 5, attempts, "exhaustion must not consume another attempt")
+
+	retrieved, err = testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
+	require.NoError(t, err)
+	assert.Equal(t, ReportStatusFailed, retrieved.Status)
+}
+
+func TestReportDB_ClaimReport_ExpiredProcessingAttemptsExhausted(t *testing.T) {
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
+	setProcessingBudget(t, report.UserID, report.ID, 0, 1)
+
+	first, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+
+	// The only allowed attempt has now been consumed. Simulate the worker
+	// dying without recording a terminal state.
+	expireLease(t, report.UserID, report.ID)
+
+	claimed, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	assert.Nil(t, claimed, "an exhausted expired report has no work left")
+
+	retrieved, err := testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
+	require.NoError(t, err)
+	assert.Equal(t, ReportStatusFailed, retrieved.Status, "an exhausted expired report must be terminalized")
+	assert.True(t, retrieved.FailedAt.Valid)
+	assert.Equal(t, reportAttemptsExhaustedMessage, retrieved.ErrorMessage.String)
+
+	// The worker that held the expired claim must not be able to overwrite the
+	// newer terminal state.
+	err = testReportDB.MarkCompleted(context.Background(), report.UserID, report.ID, first.ClaimToken, "stale.csv.gz")
+	assert.ErrorIs(t, err, ErrReportOwnershipLost)
+	err = testReportDB.MarkFailed(context.Background(), report.UserID, report.ID, first.ClaimToken, "stale failure")
+	assert.ErrorIs(t, err, ErrReportOwnershipLost)
+
+	retrieved, err = testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
+	require.NoError(t, err)
+	assert.Equal(t, ReportStatusFailed, retrieved.Status)
+}
+
+func TestReportDB_ClaimReport_ExpiredProcessingWithAttemptsRemaining(t *testing.T) {
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
+	setProcessingBudget(t, report.UserID, report.ID, 0, 3)
+
+	first, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+
+	expireLease(t, report.UserID, report.ID)
+
+	second, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	require.NotNil(t, second, "an expired report with attempts remaining must be reclaimable")
+	assert.Equal(t, ReportStatusProcessing, second.Status)
+	assert.NotEqual(t, first.ClaimToken, second.ClaimToken)
+
+	var attempts int
+	err = testDB.QueryRow(
+		`SELECT processing_attempts FROM reports WHERE user_id = $1 AND id = $2`,
+		report.UserID, report.ID,
+	).Scan(&attempts)
+	require.NoError(t, err)
+	assert.Equal(t, 2, attempts)
+}
+
+func TestReportDB_ClaimReport_AttemptsExhaustedWithLiveLease(t *testing.T) {
+	user := createTestUser(t)
+	report := createTestReport(t, user.ID)
+	setProcessingBudget(t, report.UserID, report.ID, 0, 1)
+
+	first, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+
+	// The attempt budget is exhausted, but the worker still owns a live lease.
+	// It must be allowed to finish rather than being terminalized underneath it.
+	claimed, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	assert.ErrorIs(t, err, ErrReportProcessing)
+	assert.Nil(t, claimed)
+
+	retrieved, err := testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
+	require.NoError(t, err)
+	assert.Equal(t, ReportStatusProcessing, retrieved.Status)
+	assert.False(t, retrieved.FailedAt.Valid)
+
+	// Once that lease expires without a terminal state, the report becomes
+	// terminal on the next claim.
+	expireLease(t, report.UserID, report.ID)
+
+	claimed, err = testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+	require.NoError(t, err)
+	assert.Nil(t, claimed)
+
+	retrieved, err = testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
+	require.NoError(t, err)
+	assert.Equal(t, ReportStatusFailed, retrieved.Status)
+}
+
+func TestReportDB_ClaimReport_ConcurrentExhaustedTerminalization(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(t *testing.T, report Report)
+	}{
+		{
+			name: "pending",
+			prepare: func(t *testing.T, report Report) {
+				setProcessingBudget(t, report.UserID, report.ID, 5, 5)
+			},
+		},
+		{
+			name: "expired processing",
+			prepare: func(t *testing.T, report Report) {
+				setProcessingBudget(t, report.UserID, report.ID, 0, 1)
+				claimed, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+				require.NoError(t, err)
+				require.NotNil(t, claimed)
+				expireLease(t, report.UserID, report.ID)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			user := createTestUser(t)
+			report := createTestReport(t, user.ID)
+			tt.prepare(t, report)
+
+			const workers = 8
+
+			type claimResult struct {
+				report *Report
+				err    error
+			}
+
+			results := make(chan claimResult, workers)
+			var wg sync.WaitGroup
+			for i := 0; i < workers; i++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					claimed, err := testReportDB.ClaimReport(context.Background(), report.UserID, report.ID, testClaimLease)
+					results <- claimResult{report: claimed, err: err}
+				}()
+			}
+			wg.Wait()
+			close(results)
+
+			for res := range results {
+				assert.NoError(t, res.err)
+				assert.Nil(t, res.report, "no worker may claim an exhausted report")
+			}
+
+			retrieved, err := testReportDB.GetReportByUserID(context.Background(), report.UserID, report.ID)
+			require.NoError(t, err)
+			assert.Equal(t, ReportStatusFailed, retrieved.Status)
+			assert.True(t, retrieved.FailedAt.Valid)
+		})
+	}
 }
 
 func TestReportDB_MarkFailed(t *testing.T) {
