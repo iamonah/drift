@@ -8,6 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/iamonah/drift/internal/retry"
 )
 
 type S3Actions struct {
@@ -17,6 +18,10 @@ type S3Actions struct {
 func NewS3Actions(sdkConfig aws.Config, endpoint string) *S3Actions {
 	s3Client := s3.NewFromConfig(sdkConfig, func(o *s3.Options) {
 		o.UsePathStyle = true
+		// The worker applies one shared dependency retry policy to uploads.
+		// Disable the SDK's own operation retries so attempts are not multiplied
+		// by a second exponential backoff layer.
+		o.RetryMaxAttempts = 1
 		if endpoint != "" {
 			o.BaseEndpoint = aws.String(endpoint)
 		}
@@ -29,10 +34,10 @@ func NewS3Actions(sdkConfig aws.Config, endpoint string) *S3Actions {
 
 func (s *S3Actions) UploadObject(ctx context.Context, bucketName, objectKey string, content []byte, contentType string) error {
 	if bucketName == "" {
-		return fmt.Errorf("upload object: bucket name is required")
+		return retry.Permanent(fmt.Errorf("upload object: bucket name is required"))
 	}
 	if objectKey == "" {
-		return fmt.Errorf("upload object: object key is required")
+		return retry.Permanent(fmt.Errorf("upload object: object key is required"))
 	}
 
 	_, err := s.S3Client.PutObject(ctx, &s3.PutObjectInput{
@@ -42,7 +47,11 @@ func (s *S3Actions) UploadObject(ctx context.Context, bucketName, objectKey stri
 		ContentType: aws.String(contentType),
 	})
 	if err != nil {
-		return fmt.Errorf("upload object %q to bucket %q: %w", objectKey, bucketName, err)
+		uploadErr := fmt.Errorf("upload object %q to bucket %q: %w", objectKey, bucketName, err)
+		if isPermanentUploadError(err) {
+			return retry.Permanent(uploadErr)
+		}
+		return uploadErr
 	}
 
 	return nil

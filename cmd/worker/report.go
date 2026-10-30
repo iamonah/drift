@@ -14,12 +14,32 @@ import (
 
 	"github.com/iamonah/drift/internal/client/loz"
 	"github.com/iamonah/drift/internal/infra/database/driftdb"
+	"github.com/iamonah/drift/internal/retry"
 )
 
 // reportClaimLease is how long a report may stay processing before another
-// worker is allowed to reclaim it. It must be longer than the slowest expected
-// report, because the lease is not renewed while a worker is busy.
+// worker is allowed to reclaim it. A live worker renews it periodically, but it
+// must still cover the time before the first renewal and any stalled work.
 const reportClaimLease = 3 * time.Minute
+
+// transientError marks a failure that should be recovered by letting the report
+// lease expire and the SQS message be redelivered. It must not be terminalized.
+type transientError struct {
+	err error
+}
+
+func (e *transientError) Error() string { return e.err.Error() }
+
+func (e *transientError) Unwrap() error { return e.err }
+
+func transient(err error) error { return &transientError{err: err} }
+
+func isTransientError(err error) bool {
+	var transientErr *transientError
+	return errors.As(err, &transientErr) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded)
+}
 
 func (w *Worker) ProcessReport(ctx context.Context, userID uuid.UUID, reportID uuid.UUID) (err error) {
 	report, err := w.reportStore.ReportStore.ClaimReport(ctx, userID, reportID, reportClaimLease)
@@ -38,7 +58,11 @@ func (w *Worker) ProcessReport(ctx context.Context, userID uuid.UUID, reportID u
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 
-	leaseTicker := time.NewTicker(reportClaimLease - time.Minute)
+	leaseRenewInterval := w.leaseRenewInterval
+	if leaseRenewInterval <= 0 {
+		leaseRenewInterval = reportClaimLease - time.Minute
+	}
+	leaseTicker := time.NewTicker(leaseRenewInterval)
 	defer leaseTicker.Stop()
 
 	go func() {
@@ -79,6 +103,13 @@ func (w *Worker) ProcessReport(ctx context.Context, userID uuid.UUID, reportID u
 			return
 		}
 
+		if isTransientError(err) {
+			w.log.Warn().Err(err).
+				Str("report_id", reportID.String()).
+				Msg("report left recoverable after transient dependency failure")
+			return
+		}
+
 		w.log.Error().Err(err).Str("report_id", reportID.String()).Msg("report processing failed")
 
 		// Record the failure even if the job context was cancelled.
@@ -104,9 +135,21 @@ func (w *Worker) ProcessReport(ctx context.Context, userID uuid.UUID, reportID u
 		return fmt.Errorf("unsupported report type: %s", report.ReportType)
 	}
 
-	monsters, err := w.loz.GetMonsters(ctx)
-	if err != nil {
-		return fmt.Errorf("get monsters from loz: %w", err)
+	var monsters *loz.GetMonstersResponse
+	if err := retry.Do(ctx, w.dependencyRetry, w.log, "loz get monsters", func(ctx context.Context) error {
+		var callErr error
+		monsters, callErr = w.loz.GetMonsters(ctx)
+		return callErr
+	}); err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
+		}
+
+		lozErr := fmt.Errorf("get monsters from loz: %w", err)
+		if retry.IsPermanent(err) {
+			return lozErr
+		}
+		return transient(lozErr)
 	}
 
 	// Check whether ownership was lost before generating the CSV.
@@ -128,10 +171,21 @@ func (w *Worker) ProcessReport(ctx context.Context, userID uuid.UUID, reportID u
 		return cause
 	}
 
-	// Use a distinct object key for each claim attempt.
+	// Use a distinct object key for each claim attempt. PutObject is atomic, so
+	// retrying the same key cannot expose a partially written report object.
 	objectKey := fmt.Sprintf("users/%s/reports/%s-%s.csv.gz", userID, reportID, claimToken)
-	if err := w.ObjectStorage.UploadObject(ctx, w.cfg.AWSS3.BucketName, objectKey, csvData, "application/gzip"); err != nil {
-		return fmt.Errorf("upload CSV to S3: %w", err)
+	if err := retry.Do(ctx, w.dependencyRetry, w.log, "upload report to S3", func(ctx context.Context) error {
+		return w.ObjectStorage.UploadObject(ctx, w.cfg.AWSS3.BucketName, objectKey, csvData, "application/gzip")
+	}); err != nil {
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
+		}
+
+		uploadErr := fmt.Errorf("upload CSV to S3: %w", err)
+		if retry.IsPermanent(err) {
+			return uploadErr
+		}
+		return transient(uploadErr)
 	}
 
 	if cause := context.Cause(ctx); cause != nil {

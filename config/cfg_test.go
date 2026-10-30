@@ -31,6 +31,10 @@ server:
     - http://localhost:3000
 worker:
   concurrency: 6
+  retry:
+    initial_delay: 3s
+    max_delay: 45s
+    max_retries: 2
 outbox:
   interval: 2s
   batch_size: 10
@@ -76,6 +80,11 @@ jwt:
 	if cfg.Worker.Concurrency != 6 {
 		t.Fatalf("LoadConfigFile() worker concurrency = %d, want 6", cfg.Worker.Concurrency)
 	}
+	if cfg.Worker.Retry.InitialDelay != 3*time.Second ||
+		cfg.Worker.Retry.MaxDelay != 45*time.Second ||
+		cfg.Worker.Retry.MaxRetries != 2 {
+		t.Fatalf("LoadConfigFile() worker retry = %#v, want decoded durations", cfg.Worker.Retry)
+	}
 	if cfg.Outbox.Interval != 2*time.Second ||
 		cfg.Outbox.BatchSize != 10 ||
 		cfg.Outbox.Concurrency != 2 ||
@@ -87,6 +96,32 @@ jwt:
 		cfg.Outbox.FailureThreshold != 3 ||
 		cfg.Outbox.Cooldown != 20*time.Second {
 		t.Fatalf("LoadConfigFile() outbox = %#v, want decoded durations", cfg.Outbox)
+	}
+}
+
+func TestApplyWorkerRetryDefaults(t *testing.T) {
+	var retry WorkerRetry
+	applyWorkerRetryDefaults(&retry)
+
+	if retry.InitialDelay != defaultWorkerRetryInitial ||
+		retry.MaxDelay != defaultWorkerRetryMax ||
+		retry.MaxRetries != defaultWorkerRetryAttempts {
+		t.Fatalf("applyWorkerRetryDefaults() = %#v, want defaults", retry)
+	}
+	if err := validateWorkerRetry(retry); err != nil {
+		t.Fatalf("validateWorkerRetry(defaults) error = %v", err)
+	}
+}
+
+func TestValidateWorkerRetryRejectsMaxBelowInitial(t *testing.T) {
+	retry := WorkerRetry{
+		InitialDelay: 10 * time.Second,
+		MaxDelay:     time.Second,
+		MaxRetries:   3,
+	}
+
+	if err := validateWorkerRetry(retry); err == nil {
+		t.Fatal("validateWorkerRetry() = nil, want max-delay error")
 	}
 }
 

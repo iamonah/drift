@@ -22,18 +22,21 @@ import (
 	"github.com/iamonah/drift/internal/infra/s3"
 	"github.com/iamonah/drift/internal/infra/sqs"
 	"github.com/iamonah/drift/internal/job"
+	"github.com/iamonah/drift/internal/retry"
 	"github.com/rs/zerolog"
 )
 
 type Worker struct {
-	cfg           *config.Config
-	ObjectStorage s3.ObjectStorage
-	Queue         sqs.Queue
-	reportStore   *driftdb.Store
-	loz           *loz.Client
-	log           zerolog.Logger
-	process       func(ctx context.Context, userID uuid.UUID, reportID uuid.UUID) error
-	concurrency   int
+	cfg                *config.Config
+	ObjectStorage      s3.ObjectStorage
+	Queue              sqs.Queue
+	reportStore        *driftdb.Store
+	loz                *loz.Client
+	log                zerolog.Logger
+	process            func(ctx context.Context, userID uuid.UUID, reportID uuid.UUID) error
+	concurrency        int
+	dependencyRetry    retry.Policy
+	leaseRenewInterval time.Duration
 }
 
 // reportDeferDuration is how long a message is deferred when another worker
@@ -51,14 +54,25 @@ func NewWorker(cfg *config.Config, objectStorage s3.ObjectStorage, queue sqs.Que
 		concurrency = cfg.Worker.Concurrency
 	}
 
+	var dependencyRetry retry.Policy
+	if cfg != nil {
+		dependencyRetry = retry.Policy{
+			InitialDelay: cfg.Worker.Retry.InitialDelay,
+			MaxDelay:     cfg.Worker.Retry.MaxDelay,
+			MaxRetries:   cfg.Worker.Retry.MaxRetries,
+		}
+	}
+
 	w := &Worker{
-		cfg:           cfg,
-		ObjectStorage: objectStorage,
-		Queue:         queue,
-		reportStore:   reportStore,
-		loz:           lozClient,
-		log:           log,
-		concurrency:   concurrency,
+		cfg:                cfg,
+		ObjectStorage:      objectStorage,
+		Queue:              queue,
+		reportStore:        reportStore,
+		loz:                lozClient,
+		log:                log,
+		concurrency:        concurrency,
+		dependencyRetry:    dependencyRetry,
+		leaseRenewInterval: reportClaimLease - time.Minute,
 	}
 	w.process = w.ProcessReport
 
@@ -179,6 +193,10 @@ func (w *Worker) handleMessage(ctx context.Context, queueURL string, message sqs
 	case errors.Is(err, driftdb.ErrReportProcessing), errors.Is(err, driftdb.ErrReportOwnershipLost):
 		w.log.Info().Str("report_id", reportID).Msg("report is held by another worker; deferring message")
 		w.deferMessage(ctx, queueURL, message, reportID)
+	case isTransientError(err):
+		// The report remains processing and its lease expires. Leave the
+		// message visible for redelivery once the report can be claimed again.
+		w.log.Warn().Err(err).Str("report_id", reportID).Msg("transient dependency failure; leaving message for redelivery")
 	default:
 		// Leave the message for SQS redelivery.
 		w.log.Error().Err(err).Str("report_id", reportID).Msg("report processing failed; leaving message for redelivery")

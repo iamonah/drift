@@ -147,6 +147,32 @@ func TestHandleMessage_ProcessingErrorIsNotAcknowledged(t *testing.T) {
 	assert.Empty(t, queue.deferred)
 }
 
+func TestHandleMessage_TransientDependencyFailureIsNotAcknowledged(t *testing.T) {
+	queue := &fakeQueue{}
+	worker, logs := newTestWorker(queue, func(context.Context, uuid.UUID, uuid.UUID) error {
+		return transient(errors.New("loz unavailable"))
+	})
+
+	worker.handleMessage(context.Background(), "queue-url", testMessage(t, uuid.New()))
+
+	assert.Empty(t, queue.deleted, "a recoverable report must not be acknowledged")
+	assert.Empty(t, queue.deferred)
+	assert.Contains(t, logs.String(), "transient dependency failure")
+}
+
+func TestHandleMessage_ExhaustedReportTerminalizationFailureIsNotAcknowledged(t *testing.T) {
+	queue := &fakeQueue{}
+	worker, _ := newTestWorker(queue, func(context.Context, uuid.UUID, uuid.UUID) error {
+		// The database failed while trying to terminalize an exhausted report.
+		return fmt.Errorf("claimreport: fail exhausted report: %w", errors.New("database unavailable"))
+	})
+
+	worker.handleMessage(context.Background(), "queue-url", testMessage(t, uuid.New()))
+
+	assert.Empty(t, queue.deleted, "a non-terminal exhausted report must not be acknowledged")
+	assert.Empty(t, queue.deferred)
+}
+
 func TestHandleMessage_MalformedMessageIsDeleted(t *testing.T) {
 	queue := &fakeQueue{}
 	worker, _ := newTestWorker(queue, func(context.Context, uuid.UUID, uuid.UUID) error {

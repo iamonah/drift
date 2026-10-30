@@ -24,6 +24,10 @@ server:
 
 worker:
   concurrency: 4
+  retry:
+    initial_delay: 2s
+    max_delay: 30s
+    max_retries: 4
 
 outbox:
   interval: 5s

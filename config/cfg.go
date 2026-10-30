@@ -15,6 +15,9 @@ import (
 
 const (
 	defaultWorkerConcurrency      = 4
+	defaultWorkerRetryInitial     = 2 * time.Second
+	defaultWorkerRetryMax         = 30 * time.Second
+	defaultWorkerRetryAttempts    = 4
 	defaultOutboxInterval         = 5 * time.Second
 	defaultOutboxBatchSize        = 20
 	defaultOutboxConcurrency      = 4
@@ -55,7 +58,16 @@ type Server struct {
 }
 
 type Worker struct {
-	Concurrency int `koanf:"concurrency" validate:"min=1"`
+	Concurrency int         `koanf:"concurrency" validate:"min=1"`
+	Retry       WorkerRetry `koanf:"retry"`
+}
+
+// WorkerRetry controls retries for transient worker dependency failures. A
+// report claim is not consumed again for each retry.
+type WorkerRetry struct {
+	InitialDelay time.Duration `koanf:"initial_delay"`
+	MaxDelay     time.Duration `koanf:"max_delay"`
+	MaxRetries   int           `koanf:"max_retries" validate:"min=1,max=10"`
 }
 
 // Outbox controls the API-side report outbox publisher. MaxAttempts applies
@@ -140,6 +152,7 @@ func LoadConfigFile(path string) (*Config, error) {
 	if config.Worker.Concurrency == 0 {
 		config.Worker.Concurrency = defaultWorkerConcurrency
 	}
+	applyWorkerRetryDefaults(&config.Worker.Retry)
 	applyOutboxDefaults(&config.Outbox)
 
 	validate := validator.New()
@@ -170,11 +183,40 @@ func LoadConfigFile(path string) (*Config, error) {
 		return nil, fmt.Errorf("loadconfig: S3 presign expiration must be positive")
 	}
 
+	if err := validateWorkerRetry(config.Worker.Retry); err != nil {
+		return nil, fmt.Errorf("loadconfig: %w", err)
+	}
 	if err := validateOutbox(config.Outbox); err != nil {
 		return nil, fmt.Errorf("loadconfig: %w", err)
 	}
 
 	return &config, nil
+}
+
+func applyWorkerRetryDefaults(retry *WorkerRetry) {
+	if retry.InitialDelay == 0 {
+		retry.InitialDelay = defaultWorkerRetryInitial
+	}
+	if retry.MaxDelay == 0 {
+		retry.MaxDelay = defaultWorkerRetryMax
+	}
+	if retry.MaxRetries == 0 {
+		retry.MaxRetries = defaultWorkerRetryAttempts
+	}
+}
+
+func validateWorkerRetry(retry WorkerRetry) error {
+	if retry.InitialDelay <= 0 {
+		return fmt.Errorf("worker retry initial delay must be positive")
+	}
+	if retry.MaxDelay <= 0 {
+		return fmt.Errorf("worker retry max delay must be positive")
+	}
+	if retry.MaxDelay < retry.InitialDelay {
+		return fmt.Errorf("worker retry max delay must be greater than or equal to initial delay")
+	}
+
+	return nil
 }
 
 func applyOutboxDefaults(outbox *Outbox) {
