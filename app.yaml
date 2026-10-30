@@ -25,6 +25,18 @@ server:
 worker:
   concurrency: 4
 
+outbox:
+  interval: 5s
+  batch_size: 20
+  concurrency: 4
+  send_timeout: 10s
+  claim_lease: 2m
+  max_attempts: 10
+  retry_base: 5s
+  retry_max: 5m
+  failure_threshold: 5 #represents consecutive failures where no single message was successfully sent
+  cooldown: 15s
+
 jwt:
   secret_key: secret
   issuer: drift

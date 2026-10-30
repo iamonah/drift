@@ -87,8 +87,25 @@ func (app *App) Serve() error {
 	}()
 
 	publisherCtx, stopPublisher := context.WithCancel(context.Background())
-	defer stopPublisher()
-	go app.runOutboxPublisher(publisherCtx)
+	publisherDone := make(chan struct{})
+	go func() {
+		defer close(publisherDone)
+		app.runOutboxPublisher(publisherCtx)
+	}()
+	defer func() {
+		stopPublisher()
+
+		timer := time.NewTimer(outboxShutdownGrace)
+		defer timer.Stop()
+
+		select {
+		case <-publisherDone:
+		case <-timer.C:
+			app.log.Warn().
+				Dur("grace", outboxShutdownGrace).
+				Msg("outbox publisher did not stop before shutdown grace expired")
+		}
+	}()
 
 	app.log.Info().
 		Str("port", app.cfg.Server.Port).
@@ -96,6 +113,7 @@ func (app *App) Serve() error {
 		Msg("starting server")
 
 	err = srv.ListenAndServe()
+	stopPublisher()
 	if !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

@@ -38,8 +38,10 @@ type refreshStore interface {
 
 type outboxStore interface {
 	Enqueue(ctx context.Context, entry OutboxEntry) error
-	GetPendingReports(ctx context.Context, limit int) ([]OutboxEntry, error)
-	MarkPublished(ctx context.Context, id uuid.UUID) error
+	ClaimPendingReports(ctx context.Context, limit int, lease time.Duration) ([]OutboxEntry, error)
+	MarkPublished(ctx context.Context, id uuid.UUID, claimToken uuid.UUID) error
+	ReleaseClaim(ctx context.Context, id uuid.UUID, claimToken uuid.UUID, nextAttempt time.Time, errorMessage string, countFailure bool) error
+	MarkDead(ctx context.Context, id uuid.UUID, claimToken uuid.UUID, errorMessage string) error
 }
 
 type Store struct {

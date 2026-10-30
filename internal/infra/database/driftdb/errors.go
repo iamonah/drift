@@ -12,4 +12,6 @@ var (
 	ErrReportOwnershipLost  = errors.New("report is owned by another worker")
 	ErrInvalidReportStatus  = errors.New("invalid report status")
 	ErrInvalidReportType    = errors.New("invalid report type")
+	ErrOutboxClaimLost      = errors.New("outbox claim is no longer held")
+	ErrOutboxNotDead        = errors.New("outbox entry is not dead")
 )

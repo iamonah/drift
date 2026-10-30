@@ -31,6 +31,17 @@ server:
     - http://localhost:3000
 worker:
   concurrency: 6
+outbox:
+  interval: 2s
+  batch_size: 10
+  concurrency: 2
+  send_timeout: 3s
+  claim_lease: 2m
+  max_attempts: 4
+  retry_base: 1s
+  retry_max: 10s
+  failure_threshold: 3
+  cooldown: 20s
 awssqs:
   queue_name: my-test-queue
   base_url: http://localhost:4566
@@ -65,6 +76,39 @@ jwt:
 	if cfg.Worker.Concurrency != 6 {
 		t.Fatalf("LoadConfigFile() worker concurrency = %d, want 6", cfg.Worker.Concurrency)
 	}
+	if cfg.Outbox.Interval != 2*time.Second ||
+		cfg.Outbox.BatchSize != 10 ||
+		cfg.Outbox.Concurrency != 2 ||
+		cfg.Outbox.SendTimeout != 3*time.Second ||
+		cfg.Outbox.ClaimLease != 2*time.Minute ||
+		cfg.Outbox.MaxAttempts != 4 ||
+		cfg.Outbox.RetryBase != time.Second ||
+		cfg.Outbox.RetryMax != 10*time.Second ||
+		cfg.Outbox.FailureThreshold != 3 ||
+		cfg.Outbox.Cooldown != 20*time.Second {
+		t.Fatalf("LoadConfigFile() outbox = %#v, want decoded durations", cfg.Outbox)
+	}
+}
+
+func TestApplyOutboxDefaults(t *testing.T) {
+	var outbox Outbox
+	applyOutboxDefaults(&outbox)
+
+	if outbox.Interval != defaultOutboxInterval ||
+		outbox.BatchSize != defaultOutboxBatchSize ||
+		outbox.Concurrency != defaultOutboxConcurrency ||
+		outbox.SendTimeout != defaultOutboxSendTimeout ||
+		outbox.ClaimLease != defaultOutboxClaimLease ||
+		outbox.MaxAttempts != defaultOutboxMaxAttempts ||
+		outbox.RetryBase != defaultOutboxRetryBase ||
+		outbox.RetryMax != defaultOutboxRetryMax ||
+		outbox.FailureThreshold != defaultOutboxFailureThreshold ||
+		outbox.Cooldown != defaultOutboxCooldown {
+		t.Fatalf("applyOutboxDefaults() = %#v, want defaults", outbox)
+	}
+	if err := validateOutbox(outbox); err != nil {
+		t.Fatalf("validateOutbox(defaults) error = %v", err)
+	}
 }
 
 func TestParseDuration(t *testing.T) {
@@ -74,5 +118,39 @@ func TestParseDuration(t *testing.T) {
 	}
 	if duration != 7*24*time.Hour {
 		t.Fatalf("ParseDuration() = %v, want %v", duration, 7*24*time.Hour)
+	}
+}
+
+func TestValidateOutboxRejectsShortLease(t *testing.T) {
+	outbox := Outbox{
+		Interval:    5 * time.Second,
+		BatchSize:   20,
+		Concurrency: 4,
+		SendTimeout: 10 * time.Second,
+		ClaimLease:  30 * time.Second,
+		RetryBase:   time.Second,
+		RetryMax:    10 * time.Second,
+		Cooldown:    time.Second,
+	}
+
+	if err := validateOutbox(outbox); err == nil {
+		t.Fatal("validateOutbox() = nil, want short-lease error")
+	}
+}
+
+func TestValidateOutboxRejectsRetryMaxBelowBase(t *testing.T) {
+	outbox := Outbox{
+		Interval:    5 * time.Second,
+		BatchSize:   1,
+		Concurrency: 1,
+		SendTimeout: 10 * time.Second,
+		ClaimLease:  time.Minute,
+		RetryBase:   10 * time.Second,
+		RetryMax:    time.Second,
+		Cooldown:    time.Second,
+	}
+
+	if err := validateOutbox(outbox); err == nil {
+		t.Fatal("validateOutbox() = nil, want retry-max error")
 	}
 }
